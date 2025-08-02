@@ -129,6 +129,11 @@ $(document).ready(function() {
   initializeProjectHoverAnimations();
   initializeDetailsPanelAnimations();
   initializeSliderOverviewAnimations();
+  
+  // Check if we're on the index page and animate immediately
+  if (document.querySelector('.index_item')) {
+    animateIndexPage();
+  }
   }, 100);
   
   // Initialize Barba after a small delay
@@ -388,7 +393,7 @@ function initializeSliders() {
     
     let currentSlide = 0;
     const totalSlides = $slides.length;
-    const maxSlide = Math.max(0, totalSlides - slidesPerView);
+    let maxSlide = Math.max(0, totalSlides - slidesPerView);
     
     console.log(`📊 Slider ${index + 1} config:`, {
       slidesPerView,
@@ -416,12 +421,12 @@ function initializeSliders() {
     gsap.set([$prevBtn, $nextBtn], { opacity: 1 });
     
     // Animation function
-    function updateSlider(direction = 0) {
+    function updateSlider(animated = true) {
       const offset = -(currentSlide * slideWidth);
       
       gsap.to($wrapper, {
         x: offset + '%',
-        duration: 0.4,  // Faster: was 0.6
+        duration: animated ? 0.4 : 0,  // Faster: was 0.6
         ease: "power2.inOut"  // Snappier: was "power2.out"
       });
       
@@ -453,6 +458,41 @@ function initializeSliders() {
       updateSlider();
     }
     
+    function goToSlide(slideIndex, animated = true) {
+      const newSlideIndex = Math.max(0, Math.min(slideIndex, maxSlide));
+      console.log(`🚀 Navigating to slide: ${slideIndex} -> clamped to ${newSlideIndex}`);
+      currentSlide = newSlideIndex;
+      updateSlider(animated);
+    }
+    
+    function getCurrentSlide() {
+      return currentSlide;
+    }
+    
+    // Master on/off controls for the slider
+    function disable() {
+      console.log(`🛑 Disabling slider ${index + 1}`);
+      // Reset position to zero
+      gsap.set($wrapper, { x: '0%' });
+      // Hide navigation buttons
+      gsap.set([$prevBtn, $nextBtn], { opacity: 0, pointerEvents: 'none' });
+      // Disable keyboard navigation for this slider
+      $(document).off('keydown.slider' + index);
+    }
+    
+    function enable() {
+      console.log(`✅ Enabling slider ${index + 1}`);
+      // Update to current position
+      updateSlider(false);
+      // Show navigation buttons
+      gsap.set([$prevBtn, $nextBtn], { opacity: 1, pointerEvents: 'auto' });
+      // Re-enable keyboard navigation
+      $(document).on('keydown.slider' + index, function(e) {
+        if (e.key === 'ArrowLeft') goToPrev();
+        if (e.key === 'ArrowRight') goToNext();
+      });
+    }
+    
     // Bind events
     $prevBtn.on('click', goToPrev);
     $nextBtn.on('click', goToNext);
@@ -468,7 +508,7 @@ function initializeSliders() {
       const newIsMobile = window.innerWidth < 992;
       const newSlidesPerView = newIsMobile ? 1 : 2;
       const newSlideWidth = 100 / newSlidesPerView;
-      const newMaxSlide = Math.max(0, totalSlides - newSlidesPerView);
+      maxSlide = Math.max(0, totalSlides - newSlidesPerView);
       
       // Update slide widths via CSS
       if (newIsMobile) {
@@ -478,8 +518,8 @@ function initializeSliders() {
       }
       
       // Adjust current slide if needed (with looping, just ensure it's within bounds)
-      if (currentSlide > newMaxSlide) {
-        currentSlide = newMaxSlide;
+      if (currentSlide > maxSlide) {
+        currentSlide = maxSlide;
       }
       
       // Update position
@@ -519,7 +559,15 @@ function initializeSliders() {
       console.log(`🧹 Slider ${index + 1} cleaned up`);
     };
     
-    sliderInstances.push({ cleanup, element: $slider });
+    sliderInstances.push({
+      cleanup,
+      element: $slider,
+      slides: $slides,
+      goToSlide,
+      getCurrentSlide,
+      disable,
+      enable
+    });
     
     console.log(`✅ GSAP slider ${index + 1} initialized successfully`);
   });
@@ -642,6 +690,13 @@ function initializeBarba() {
           console.log('📧 Contact page loaded');
           animateContactPage();
         }
+      },
+      {
+        namespace: 'index',
+        afterEnter() {
+          console.log('🏠 Index page loaded');
+          animateIndexPage();
+        }
       }
     ]
   });
@@ -715,6 +770,34 @@ function animateHomePage() {
     ease: "power2.out",
     delay: 0.5
   });
+}
+
+function animateIndexPage() {
+  console.log('📋 Animating index page elements...');
+  
+  const indexItems = document.querySelectorAll('.index_item');
+  
+  if (indexItems.length > 0) {
+    // Set initial state (hidden and slightly below)
+    gsap.set(indexItems, {
+      opacity: 0,
+      y: 20
+    });
+    
+    // Animate in with stagger
+    gsap.to(indexItems, {
+      opacity: 1,
+      y: 0,
+      stagger: 0.02,
+      duration: 0.2,
+      ease: 'power1.out',
+      delay: 0.2
+    });
+    
+    console.log(`✅ Animated ${indexItems.length} index items with stagger`);
+  } else {
+    console.log('ℹ️ No .index_item elements found on this page');
+  }
 }
 
 function animateContactPage() {
@@ -1149,6 +1232,27 @@ function destroySliderOverviewAnimations() {
   
   // Remove click event listeners
   $(document).off('click.sliderOverview', '#Overview');
+  $('.swiper-wrapper').off('click.sliderOverview', '.swiper-slide');
+  
+  // CRITICAL: Clean up DOM state completely
+  const $swiper = $('.swiper');
+  const $swiperWrapper = $('.swiper-wrapper');
+  const $overviewBtn = $('#Overview');
+  
+  if ($swiper.length && $swiperWrapper.length) {
+    // Remove all overview classes
+    $swiperWrapper.removeClass('is-overview');
+    $swiper.removeClass('overview-active');
+    $overviewBtn.removeClass('active');
+    
+    // Re-enable slider if it was disabled
+    const sliderInstance = sliderInstances.length > 0 ? sliderInstances[0] : null;
+    if (sliderInstance && sliderInstance.enable) {
+      sliderInstance.enable();
+    }
+    
+    console.log('🎯 [OVERVIEW CLEANUP] DOM classes cleaned, slider re-enabled');
+  }
   
   // Reset state
   sliderOverviewState.isOverviewMode = false;
@@ -1189,6 +1293,9 @@ function initializeSliderOverviewAnimations() {
     slides: $slides.length
   });
   
+  // Get the primary slider instance for this page
+  const sliderInstance = sliderInstances[0]; // Assuming one slider per page
+  
   // STEP 3: Add CSS for overview mode
   console.log('🎨 [OVERVIEW INIT] Step 3: Adding overview mode CSS...');
   const overviewCSS = `
@@ -1198,12 +1305,6 @@ function initializeSliderOverviewAnimations() {
       .swiper.overview-active .slider-next {
         opacity: 0 !important;
         pointer-events: none !important;
-      }
-      
-      /* Overview button active state */
-      #Overview.active {
-        background-color: rgba(0,0,0,0.1) !important;
-        color: #000 !important;
       }
     </style>
   `;
@@ -1233,6 +1334,26 @@ function initializeSliderOverviewAnimations() {
     }
   });
   
+  // STEP 5: Set up click handler for slides in overview mode
+  console.log('🎨 [OVERVIEW INIT] Step 5: Setting up slide click handler for navigation...');
+  $swiperWrapper.on('click.sliderOverview', '.swiper-slide', function() {
+    // Only act if we are in overview mode
+    if (!sliderOverviewState.isOverviewMode || sliderOverviewState.isAnimating) {
+      return;
+    }
+    
+    const slideIndex = $(this).index();
+    console.log(`🖼️ [OVERVIEW NAV] Clicked on thumbnail for slide index: ${slideIndex}`);
+    
+    // Use the exposed slider controls to go to the correct slide (without animation)
+    if (sliderInstance && sliderInstance.goToSlide) {
+      sliderInstance.goToSlide(slideIndex, false);
+    }
+    
+    // Deactivate overview mode to return to the slider
+    deactivateOverviewMode();
+  });
+  
   console.log('🎉 [OVERVIEW INIT] ===== SLIDER OVERVIEW TOGGLE READY! =====');
   console.log('📋 [OVERVIEW INIT] Animation Summary:');
   console.log('   • Click "Overview" to show all slides at once (grid mode)');
@@ -1250,13 +1371,18 @@ function activateOverviewMode() {
   
   // Set state IMMEDIATELY 
   sliderOverviewState.isAnimating = true;
-  // sliderOverviewState.isOverviewMode = true; // BUG: State updated too early
   
   const $overviewBtn = $('#Overview');
   const $swiper = $('.swiper');
   const $swiperWrapper = $('.swiper-wrapper');
   const $slides = $('.swiper-slide');
   const $navButtons = $('.slider-prev, .slider-next');
+  
+  // CRITICAL: Disable slider functionality first
+  const sliderInstance = sliderInstances.length > 0 ? sliderInstances[0] : null;
+  if (sliderInstance && sliderInstance.disable) {
+    sliderInstance.disable();
+  }
   
   // Create timeline for smooth transition
   const activateTimeline = gsap.timeline({
@@ -1266,38 +1392,41 @@ function activateOverviewMode() {
     onComplete: () => {
       console.log('✅ [OVERVIEW ON] Overview mode activated - all slides visible');
       sliderOverviewState.isAnimating = false;
-      sliderOverviewState.isOverviewMode = true; // CORRECT: State updated on completion
+      sliderOverviewState.isOverviewMode = true; // State updated on completion
     }
   });
   
   console.log('🎭 [OVERVIEW ON] Step 1: Simple smooth transition to grid...');
   
   // ANIMATION SEQUENCE:
-  // 1. Fade out navigation buttons
-  activateTimeline.to($navButtons, {
+  // 1. Fade out slides with scale effect
+  activateTimeline.to($slides, {
+    scale: 0.9,
     opacity: 0,
-    duration: 0.3,
-    ease: 'power2.out',
-    onComplete: () => console.log('   ✅ [OVERVIEW ON] Navigation buttons faded out')
-  }, 0)
-  
-  // 2. Add classes and animate slides into grid
-  .add(() => {
-    $swiperWrapper.addClass('is-overview');
-    $swiper.addClass('overview-active');
-    $overviewBtn.addClass('active');
-    console.log('   🏷️ [OVERVIEW ON] Classes added: is-overview, overview-active, active');
-  }, 0.2)
-  
-  // 3. Simple fade in of all slides
-  .to($slides, {
-    opacity: 1,
-    duration: 0.4,
+    duration: 0.5,
     stagger: 0.05,
-    ease: 'power2.out',
-    onStart: () => console.log('   📋 [OVERVIEW ON] Slides fading into grid layout'),
-    onComplete: () => console.log('   ✅ [OVERVIEW ON] All slides visible in grid')
-  }, 0.3);
+    ease: 'power2.inOut',
+    onStart: () => console.log('   📉 [OVERVIEW ON] Fading out slides for transition'),
+    onComplete: () => {
+      console.log('   ✅ [OVERVIEW ON] Slides faded out');
+      
+      // 2. Add classes and update layout (happens instantly when slides are hidden)
+      $swiperWrapper.addClass('is-overview');
+      $swiper.addClass('overview-active');
+      $overviewBtn.addClass('active');
+      console.log('   🏷️ [OVERVIEW ON] Classes added for grid layout');
+      
+      // 3. Stagger slides back in
+      gsap.to($slides, {
+        scale: 1,
+        opacity: 1,
+        y: 0,
+        duration: 0.6,
+        ease: 'power2.out',
+        stagger: 0.1
+      });
+    }
+  }, 0);
   
   console.log('🚀 [OVERVIEW ON] Overview activation timeline launched!');
 }
@@ -1311,7 +1440,7 @@ function deactivateOverviewMode() {
   
   // Set state IMMEDIATELY
   sliderOverviewState.isAnimating = true;
-  // sliderOverviewState.isOverviewMode = false; // BUG: State updated too early
+  sliderOverviewState.isOverviewMode = false; // State updated on completion
   
   const $overviewBtn = $('#Overview');
   const $swiper = $('.swiper');
@@ -1327,46 +1456,57 @@ function deactivateOverviewMode() {
     onComplete: () => {
       console.log('✅ [OVERVIEW OFF] Slider mode restored - carousel behavior active');
       sliderOverviewState.isAnimating = false;
-      sliderOverviewState.isOverviewMode = false; // CORRECT: State updated on completion
+      
+      // CRITICAL: Re-enable slider functionality after animation
+      const sliderInstance = sliderInstances.length > 0 ? sliderInstances[0] : null;
+      if (sliderInstance && sliderInstance.enable) {
+        sliderInstance.enable();
+      }
     }
   });
   
-  console.log('🎭 [OVERVIEW OFF] Step 1: Simple smooth transition back to slider...');
+  console.log('🎭 [OVERVIEW OFF] Step 1: Fading out grid to reveal slider...');
   
+  const sliderInstance = sliderInstances.length > 0 ? sliderInstances[0] : null;
+
   // ANIMATION SEQUENCE:
-  // 1. Fade out slides slightly
+  // 1. Fade out all the slides in the grid
   deactivateTimeline.to($slides, {
-    opacity: 0.8,
-    duration: 0.2,
-    ease: 'power2.out',
-    onComplete: () => console.log('   📐 [OVERVIEW OFF] Slides fading for transition')
-  }, 0)
-  
-  // 2. Remove classes and switch layout
-  .add(() => {
-    $swiperWrapper.removeClass('is-overview');
-    $swiper.removeClass('overview-active');
-    $overviewBtn.removeClass('active');
-    console.log('   🏷️ [OVERVIEW OFF] Classes removed: is-overview, overview-active, active');
-  }, 0.15)
-  
-  // 3. Fade slides back to full opacity
-  .to($slides, {
-    opacity: 1,
-    duration: 0.3,
-    ease: 'power2.out',
-    onStart: () => console.log('   🎠 [OVERVIEW OFF] Slides returning to carousel layout'),
-    onComplete: () => console.log('   ✅ [OVERVIEW OFF] Slides back in carousel mode')
-  }, 0.2)
-  
-  // 4. Fade navigation buttons back in
-  .to($navButtons, {
-    opacity: 1,
-    duration: 0.3,
-    ease: 'power2.out',
-    onComplete: () => console.log('   ✅ [OVERVIEW OFF] Navigation buttons restored')
-  }, 0.4);
-  
-  console.log('🚀 [OVERVIEW OFF] Overview deactivation timeline launched!');
+    duration: 0.4,
+    opacity: 0,
+    scale: 0.9,
+    ease: 'power2.inOut',
+    stagger: 0.05,
+    onComplete: () => {
+      // 2. After they are faded out, change the classes
+      $swiperWrapper.removeClass('is-overview');
+      $swiper.removeClass('overview-active');
+      $overviewBtn.removeClass('active');
+      console.log('   🏷️ [OVERVIEW OFF] Classes removed, slider layout restored.');
+
+      // Resync the slider's visual position instantly
+      if (sliderInstance) {
+        sliderInstance.goToSlide(sliderInstance.getCurrentSlide(), false);
+      }
+
+      // 3. Explicitly animate FROM invisible TO visible using fromTo for robustness
+      gsap.fromTo([$slides, $navButtons], 
+        { // FROM state
+          opacity: 0,
+          scale: 0.9
+        }, 
+        { // TO state
+          opacity: 1,
+          scale: 1,
+          duration: 0.5,
+          ease: 'power2.out',
+          stagger: {
+            each: 0.05,
+            from: "start"
+          }
+        }
+      );
+    }
+  });
 }
 
