@@ -207,8 +207,15 @@ function handleScroll() {
     const rect = item.element.getBoundingClientRect();
     const windowHeight = window.innerHeight;
     
-    // Check if element is 85% into viewport (scrolling down trigger)
-    if (rect.top <= windowHeight * 0.85) {
+    // IMPROVED: Check if element is visible OR 85% into viewport
+    // For large elements: any part visible triggers animation
+    // For normal elements: 85% trigger still applies
+    const isLargeElement = item.element.classList.contains('project_masonry_item');
+    const isVisible = isLargeElement 
+      ? (rect.bottom > 0 && rect.top < windowHeight) // Large: any part visible
+      : (rect.top <= windowHeight * 0.85); // Normal: 85% trigger
+    
+    if (isVisible) {
       if (!item.animated) {
         console.log(`✨ Animating project element ${index + 1}`);
         gsap.to(item.element, {
@@ -274,6 +281,31 @@ function initializeScrollAnimations() {
     
     // Check immediately in case elements are already in view
     handleScroll();
+    
+    // FORCE ANIMATE LARGE MASONRY ITEMS: They often fail scroll detection due to size/positioning
+    setTimeout(() => {
+      scrollAnimationElements.forEach((item, index) => {
+        const element = item.element;
+        
+        // Only target large masonry items that haven't animated yet
+        if (element.classList.contains('project_masonry_item') && !item.animated) {
+          const style = element.getAttribute('item-style');
+          
+          // Force animate large and x-large items immediately
+          if (style === 'large' || style === 'x-large') {
+            console.log(`🎯 [BIG ELEMENT FIX] Force animating large masonry item: ${style}`);
+            gsap.to(element, {
+              opacity: 1,
+              y: 0,
+              duration: 0.8,
+              ease: "power2.out",
+              delay: index * 0.1
+            });
+            item.animated = true;
+          }
+        }
+      });
+    }, 200); // Small delay to ensure DOM is ready
     
     console.log('✅ Scroll animations for project elements initialized');
   } else {
