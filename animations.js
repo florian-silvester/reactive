@@ -1,5 +1,10 @@
 console.log('🎨 Animations.js loaded');
 
+// SVGs start hidden via Webflow (opacity: 0), just set the y position
+gsap.set(['.studio_svg', '.penzlien_svg'], {
+  y: 30
+});
+
 /*
 🎯 QUICK REFERENCE - HOVER ANIMATIONS:
    • initializeProjectHoverAnimations() - Main setup function (auto-runs on page load)
@@ -439,6 +444,19 @@ $(document).ready(function() {
     
     // Apply random masonry offsets on initial page load
     randomizeMasonryOffsets();
+    
+    // SIMPLE SVG ANIMATION - Always animate these on page load
+    console.log('🎨 Starting SVG logo animation...');
+    gsap.to(['.studio_svg', '.penzlien_svg'], {
+      opacity: 1,
+      y: 0,
+      duration: 0.8,
+      ease: "power2.out",
+      delay: 0.8,
+      stagger: 0.2,
+      onStart: () => console.log('✨ SVG logos animating in'),
+      onComplete: () => console.log('✅ SVG logo animation complete')
+    });
     
     // Check if we're on the index page and animate immediately
     if (document.querySelector('.index_item')) {
@@ -1099,17 +1117,9 @@ function animateSliderEntrance() {
 // 🎨 PAGE-SPECIFIC ANIMATIONS
 // ================================================================================
 
-function animateHomePage() {
-  console.log('🎨 Animating home page elements...');
+
   
-  // Animate logo
-  gsap.from('.intro_logo_wrap', {
-    scale: 0.8,
-    opacity: 0,
-    duration: 1,
-    ease: "power2.out",
-    delay: 0.3
-  });
+
   
   // Animate project items with stagger
   gsap.from('.projects_item', {
@@ -1120,48 +1130,12 @@ function animateHomePage() {
     ease: "power2.out",
     delay: 0.5
   });
-}
-
-function animateIndexPage() {
-  console.log('📋 Animating index page elements...');
   
-  const indexItems = document.querySelectorAll('.index_item');
+// ================================================================================
+// 🎨 page load SVGs  
+// ================================================================================
   
-  if (indexItems.length > 0) {
-    // Set initial state (hidden and slightly below)
-    gsap.set(indexItems, {
-      opacity: 0,
-      y: 20
-    });
-    
-    // Animate in with stagger
-    gsap.to(indexItems, {
-      opacity: 1,
-      y: 0,
-      stagger: 0.02,
-      duration: 0.2,
-      ease: 'power1.out',
-      delay: 0.2
-    });
-    
-    console.log(`✅ Animated ${indexItems.length} index items with stagger`);
-  } else {
-    console.log('ℹ️ No .index_item elements found on this page');
-  }
-}
-
-function animateContactPage() {
-  console.log('📧 Animating contact page elements...');
   
-  // Add contact page specific animations here
-  gsap.from('.contact-content', {
-    y: 30,
-    opacity: 0,
-    duration: 0.6,
-    ease: "power2.out",
-    delay: 0.3
-  });
-}
 
 // ================================================================================
 // 🧪 UTILITY & TEST FUNCTIONS
