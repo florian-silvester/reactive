@@ -49,6 +49,9 @@ let scrollPositions = {};
 // Global click position storage for transform origin effect
 let clickPosition = { x: 50, y: 50 }; // Default to center
 
+// Session flag for hero_wrap animation (only play once per session)
+let heroAnimationPlayed = false;
+
 // ================================================================================
 // 🖱️ CUSTOM CURSOR SYSTEM
 // ================================================================================
@@ -1018,7 +1021,14 @@ function initializeBarba() {
           // HOMEPAGE ANIMATIONS - Check if we're entering the homepage
           if (data.next.container.querySelector('.studio_svg') || data.next.container.querySelector('.penzlien_svg')) {
             console.log('🎯 Homepage detected in Barba transition');
-            animateHomepageElements('Barba transition');
+            
+            // CRITICAL: Check stored scroll position to determine if at top
+            const nextPagePath = data.next.url.path;
+            const storedScrollPosition = scrollPositions[nextPagePath] || 0;
+            console.log(`📍 Stored scroll position for homepage: ${storedScrollPosition}px`);
+            
+            // Pass scroll info to animation function
+            animateHomepageElements('Barba transition', storedScrollPosition);
             
             // CRITICAL: Also initialize scroll animations for SVGs
             initializeSVGScrollAnimations();
@@ -1969,7 +1979,7 @@ function deactivateOverviewMode() {
  * Handles SVG logo animation + hero wrap height animation
  * Called from: direct page load, Barba transitions, and index page view
  */
-function animateHomepageElements(context = 'unknown') {
+function animateHomepageElements(context = 'unknown', overrideScrollY = null) {
   console.log(`🎨 Starting homepage animations (${context})...`);
   
   // Find SVG elements
@@ -1988,35 +1998,64 @@ function animateHomepageElements(context = 'unknown') {
     y: 30
   });
   
-  // STEP 2: Animate SVGs
-  gsap.to(svgElements, {
-    opacity: 1,
-    y: 0,
-    duration: 0.8,
-    ease: "power2.out",
-    delay: 0.8,
-    stagger: 0.2,
-    onStart: () => console.log(`✨ SVG logos animating in (${context})`),
-    onComplete: () => console.log(`✅ SVG logo animation complete (${context})`)
-  });
+  // STEP 2: Animate SVGs - but ONLY if at top of page
+  // Use override scroll position if provided (for Barba transitions)
+  const currentScrollY = overrideScrollY !== null ? overrideScrollY : window.scrollY;
+  const isAtTop = currentScrollY <= 50;
+  console.log(`🔍 Checking scroll position: ${currentScrollY}px (${overrideScrollY !== null ? 'from Barba stored position' : 'from current window.scrollY'})`);
   
-  // STEP 3: Animate hero wrap (if it exists)
+  if (isAtTop) {
+    // AT TOP: Play entrance animation
+    console.log(`🔝 Page is at top (${currentScrollY}px) - playing SVG entrance animation (${context})`);
+    gsap.to(svgElements, {
+      opacity: 1,
+      y: 0,
+      duration: 0.8,
+      ease: "power2.out",
+      delay: 0.8,
+      stagger: 0.2,
+      onStart: () => console.log(`✨ SVG logos animating in (${context})`),
+      onComplete: () => console.log(`✅ SVG logo animation complete (${context})`)
+    });
+  } else {
+    // NOT AT TOP: Set to hidden state (no entrance animation)
+    console.log(`📍 Page is scrolled down (${currentScrollY}px) - setting SVGs to hidden state (${context})`);
+    gsap.set(svgElements, {
+      opacity: 0,
+      y: 0 // Reset y position but keep hidden
+    });
+    // Update scroll animation state
+    svgsVisible = false;
+  }
+  
+  // STEP 3: Hero wrap - only animate ONCE per session
   if (heroWrap) {
     console.log(`🔍 Current hero_wrap height (${context}):`, getComputedStyle(heroWrap).height);
     
-    gsap.fromTo(heroWrap, 
-      {
-        height: getComputedStyle(heroWrap).height
-      },
-      {
-        height: '70vh',
-        duration: 0.8,
-        ease: "power2.out",
-        delay: 1.8, // 0.8s (SVG delay) + 1s = 1.8s total delay
-        onStart: () => console.log(`✨ Hero wrap animating to 70vh height (${context})`),
-        onComplete: () => console.log(`✅ Hero wrap animation complete (${context})`)
-      }
-    );
+    if (!heroAnimationPlayed) {
+      // FIRST TIME: Animate to 70vh
+      console.log(`🎬 First session load - animating hero_wrap to 70vh (${context})`);
+      gsap.fromTo(heroWrap, 
+        {
+          height: getComputedStyle(heroWrap).height
+        },
+        {
+          height: '70vh',
+          duration: 0.8,
+          ease: "power2.out",
+          delay: 1.8, // 0.8s (SVG delay) + 1s = 1.8s total delay
+          onStart: () => console.log(`✨ Hero wrap animating to 70vh height (${context})`),
+          onComplete: () => {
+            console.log(`✅ Hero wrap animation complete (${context})`);
+            heroAnimationPlayed = true; // Mark as played for session
+          }
+        }
+      );
+    } else {
+      // SUBSEQUENT TIMES: Set to 70vh immediately (no animation)
+      console.log(`🔄 Hero animation already played this session - setting to 70vh instantly (${context})`);
+      gsap.set(heroWrap, { height: '70vh' });
+    }
   } else {
     console.log(`ℹ️ No .hero_wrap found (${context})`);
   }
