@@ -90,8 +90,72 @@ function setupCustomCursorListeners() {
   // Clean up any old hover listeners first
   $(document).off('mouseenter.customCursor mouseleave.customCursor');
 
-  // PROJECT LINKS: Show "View" and scale dot
-  $(document).on('mouseenter.customCursor', '.project_link', () => updateCursorLabel("View", true));
+  // PROJECT LINKS: Show dynamic location from CMS and scale dot
+  $(document).on('mouseenter.customCursor', '.project_link', function() {
+    // DEBUG: Log the complete structure to help identify Location field placement
+    console.log('🔍 [CURSOR DEBUG] Project link structure:', $(this)[0]);
+    console.log('🔍 [CURSOR DEBUG] Parent project container:', $(this).closest('.project_masonry_item, .projects_item')[0]);
+    
+    let locationText = "View"; // Fallback text
+    const $projectContainer = $(this).closest('.project_masonry_item, .projects_item');
+    
+    // Method 1: Look for "Location" field by exact class name (most likely in Webflow)
+    const $locationByClass = $projectContainer.find('.location, .Location, .project-location');
+    console.log('🔍 [CURSOR DEBUG] Found by class (.location, .Location):', $locationByClass.length, $locationByClass.text());
+    
+    // Method 2: Look for Location in any text element or div within project
+    const $allTextElements = $projectContainer.find('*').filter(function() {
+      const text = $(this).text().trim();
+      return text.length > 0 && text.length < 50; // Reasonable location text length
+    });
+    console.log('🔍 [CURSOR DEBUG] All text elements in project:', $allTextElements.length);
+    $allTextElements.each(function(i) {
+      if (i < 5) { // Log first 5 text elements
+        console.log(`   Text ${i + 1}:`, $(this).text().trim(), '| Class:', $(this).attr('class'));
+      }
+    });
+    
+    // Method 3: Look for data attributes
+    const dataLocation = $(this).attr('data-location') || $projectContainer.attr('data-location');
+    console.log('🔍 [CURSOR DEBUG] Data-location attribute:', dataLocation);
+    
+    // Method 4: Try to find any element containing location-like text
+    const $locationElements = $projectContainer.find('*').filter(function() {
+      const classes = $(this).attr('class') || '';
+      return classes.toLowerCase().includes('location') || 
+             classes.toLowerCase().includes('city') ||
+             classes.toLowerCase().includes('place');
+    });
+    console.log('🔍 [CURSOR DEBUG] Elements with location-related classes:', $locationElements.length);
+    $locationElements.each(function(i) {
+      console.log(`   Location element ${i + 1}:`, $(this).text().trim(), '| Class:', $(this).attr('class'));
+    });
+    
+         // Get the FULL location text from any element that contains it
+     let foundLocationText = "";
+     
+     // Check all text elements for location content
+     $allTextElements.each(function() {
+       const fullText = $(this).text().trim();
+       // If text contains reasonable location-like content, use it as-is
+       if (fullText.length > 2 && fullText.length < 100) {
+         foundLocationText = fullText;
+         console.log(`🎯 [CURSOR DEBUG] Found location text: "${fullText}"`);
+         return false; // Use the first reasonable text found
+       }
+     });
+     
+     // Use the location data methods or the found text
+     const classLocation = $locationByClass.first().text().trim();
+     const dataLocationText = dataLocation;
+     const locationElementText = $locationElements.first().text().trim();
+     
+     // Use the first non-empty location found - FULL TEXT AS-IS
+     locationText = dataLocationText || classLocation || locationElementText || foundLocationText || "View";
+    
+    console.log(`🎯 [CURSOR RESULT] Final location text: "${locationText}"`);
+    updateCursorLabel(locationText, true);
+  });
   $(document).on('mouseleave.customCursor', '.project_link', () => updateCursorLabel("", false));
 
   // NAVIGATION ITEMS: Scale dot, no text
@@ -185,6 +249,36 @@ function initializeCustomCursor() {
   customCursorState.isInitialized = true;
   console.log('🎉 [CURSOR INIT] ===== ONE-TIME CURSOR SETUP COMPLETE! =====');
   console.log('   - Mouse movement tracking is now active permanently.');
+}
+
+// ================================================================================
+// 🎲 MASONRY RANDOMIZER
+// ================================================================================
+
+/**
+ * MASONRY VERTICAL OFFSET RANDOMIZER
+ * Adds random vertical gaps to small and medium masonry items
+ * Needs to run on every page transition since Barba doesn't trigger DOMContentLoaded
+ */
+function randomizeMasonryOffsets() {
+  console.log('🎲 Randomizing masonry item vertical offsets...');
+  
+  const gaps = ['0', '5vw', '15vw', '25vw'];
+  const masonryItems = document.querySelectorAll(
+    '.project_masonry_item[item-style="small"],' +
+    '.project_masonry_item[item-style="medium"]'
+  );
+  
+  if (masonryItems.length > 0) {
+    masonryItems.forEach((item, index) => {
+      const gap = gaps[Math.floor(Math.random() * gaps.length)];
+      item.style.marginTop = gap;
+      console.log(`🎲 Item ${index + 1}: Applied ${gap} margin-top`);
+    });
+    console.log(`✅ Applied random offsets to ${masonryItems.length} masonry items`);
+  } else {
+    console.log('ℹ️ No small/medium masonry items found on this page');
+  }
 }
 
 // ================================================================================
@@ -342,6 +436,9 @@ $(document).ready(function() {
     
     // CRITICAL: Initialize cursor ONCE on page load
     initializeCustomCursor();
+    
+    // Apply random masonry offsets on initial page load
+    randomizeMasonryOffsets();
     
     // Check if we're on the index page and animate immediately
     if (document.querySelector('.index_item')) {
@@ -901,6 +998,9 @@ function initializeBarba() {
 
           // Re-setup hover listeners for the new page's content
           setupCustomCursorListeners();
+          
+          // Apply random masonry offsets for new page content
+          randomizeMasonryOffsets();
 
           // Simple fade in - NO DELAY
           return gsap.fromTo(data.next.container,
