@@ -676,8 +676,9 @@ function initializeSliders() {
     // Master on/off controls for the slider
     function disable() {
       console.log(`🛑 Disabling slider ${index + 1}`);
-      // Reset position to zero
-      gsap.set($wrapper, { x: '0%' });
+      // DON'T reset position - preserve current slide position for overview mode
+      // The wrapper will be handled by CSS classes for overview mode
+      
       // Hide global navigation elements when slider is disabled (for overview mode)
       gsap.set([$globalPrevBtn, $globalNextBtn], { 
         opacity: 0, 
@@ -1744,13 +1745,17 @@ function activateOverviewMode() {
     onComplete: () => {
       console.log('   ✅ [OVERVIEW ON] Slides faded out');
       
-      // 2. Add classes and update layout (happens instantly when slides are hidden)
+      // 2. Reset wrapper position while slides are invisible (no visual jump)
+      gsap.set($swiperWrapper, { x: '0%' });
+      console.log('   🔄 [OVERVIEW ON] Wrapper position reset for grid layout');
+      
+      // 3. Add classes and update layout (happens instantly when slides are hidden)
       $swiperWrapper.addClass('is-overview');
       $swiper.addClass('overview-active');
       $overviewBtn.addClass('active');
       console.log('   🏷️ [OVERVIEW ON] Classes added for grid layout');
       
-      // 3. Stagger slides back in
+      // 4. Stagger slides back in
       gsap.to($slides, {
         scale: 1,
         opacity: 1,
