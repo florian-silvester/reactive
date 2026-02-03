@@ -331,6 +331,21 @@ if (!window.barbaInitialized) {
             initializeNavShrinkOnScroll();
           }, 650);
 
+          // Initialize Marquee
+          setTimeout(() => {
+            initMarquee();
+          }, 680);
+
+          // Initialize Text type animation
+          setTimeout(() => {
+            initTextType();
+          }, 690);
+
+          // Initialize radial overlay
+          setTimeout(() => {
+            initRadialOverlay();
+          }, 695);
+
           // Initialize GSAP smooth scroll (optional)
           setTimeout(() => {
             initSmoothScroll();
@@ -375,6 +390,21 @@ if (!window.barbaInitialized) {
     setTimeout(() => {
       initializeNavShrinkOnScroll();
     }, 1150);
+
+    // Initialize Marquee
+    setTimeout(() => {
+      initMarquee();
+    }, 1180);
+
+    // Initialize Text type animation
+    setTimeout(() => {
+      initTextType();
+    }, 1190);
+
+    // Initialize radial overlay
+    setTimeout(() => {
+      initRadialOverlay();
+    }, 1195);
 
     // Initialize GSAP smooth scroll (optional)
     setTimeout(() => {
@@ -701,8 +731,18 @@ function initializeMenuToggle() {
     const trigger = event.target.closest('[data-menu-trigger]');
     if (!trigger) return;
 
-    if (window.navShrinkControl && typeof window.navShrinkControl.expand === 'function') {
-      window.navShrinkControl.expand();
+    if (window.navShrinkControl) {
+      const currentMenu = document.querySelector('[data-menu]');
+      if (currentMenu && typeof window.navShrinkControl.getState === 'function') {
+        currentMenu.dataset.navRestore = window.navShrinkControl.getState();
+        console.log('🧭 [NAV] store restore state:', currentMenu.dataset.navRestore);
+      }
+      if (typeof window.navShrinkControl.setMenuOpen === 'function') {
+        window.navShrinkControl.setMenuOpen(true);
+      }
+      if (typeof window.navShrinkControl.expand === 'function') {
+        window.navShrinkControl.expand();
+      }
     }
 
     const currentMenu = document.querySelector('[data-menu]');
@@ -720,12 +760,31 @@ function initializeMenuToggle() {
         ease: 'power2.out',
         onComplete: () => {
           currentMenu.style.pointerEvents = 'none';
+          if (window.navShrinkControl) {
+            if (typeof window.navShrinkControl.setMenuOpen === 'function') {
+              window.navShrinkControl.setMenuOpen(false);
+            }
+            if (typeof window.navShrinkControl.pauseScroll === 'function') {
+              window.navShrinkControl.pauseScroll(500);
+            }
+            const restore = currentMenu.dataset.navRestore;
+            console.log('🧭 [NAV] restore state (trigger close):', restore);
+            if (restore === 'shrunk' && typeof window.navShrinkControl.shrink === 'function') {
+              window.navShrinkControl.shrink();
+            } else if (typeof window.navShrinkControl.expand === 'function') {
+              window.navShrinkControl.expand();
+            }
+          }
         },
       });
     } else {
       currentMenu.dataset.menuOpen = 'true';
       currentMenu.style.pointerEvents = 'auto';
       const targetHeight = currentMenu.scrollHeight;
+      const menuItemCandidates = Array.from(currentMenu.querySelectorAll('[data-menu-item]'));
+      const menuItems = menuItemCandidates.length > 0
+        ? menuItemCandidates
+        : Array.from(currentMenu.children);
       gsap.to(currentMenu, {
         autoAlpha: 1,
         height: targetHeight,
@@ -737,6 +796,21 @@ function initializeMenuToggle() {
           currentMenu.style.height = 'auto';
         },
       });
+      // Ensure nav expands after menu opens (recompute width)
+      if (window.navShrinkControl && typeof window.navShrinkControl.expand === 'function') {
+        setTimeout(() => window.navShrinkControl.expand(), 80);
+      }
+      if (menuItems.length > 0) {
+        const tl = gsap.timeline();
+        menuItems.forEach((item, index) => {
+          tl.fromTo(
+            item,
+            { y: 8, opacity: 0 },
+            { y: 0, opacity: 1, duration: 0.35, ease: 'power2.out' },
+            0.15 + index * 0.1
+          );
+        });
+      }
     }
   });
 
@@ -754,6 +828,21 @@ function initializeMenuToggle() {
       ease: 'power2.out',
       onComplete: () => {
         currentMenu.style.pointerEvents = 'none';
+        if (window.navShrinkControl) {
+          if (typeof window.navShrinkControl.setMenuOpen === 'function') {
+            window.navShrinkControl.setMenuOpen(false);
+          }
+          if (typeof window.navShrinkControl.pauseScroll === 'function') {
+            window.navShrinkControl.pauseScroll(500);
+          }
+          const restore = currentMenu.dataset.navRestore;
+          console.log('🧭 [NAV] restore state (closeMenu):', restore);
+          if (restore === 'shrunk' && typeof window.navShrinkControl.shrink === 'function') {
+            window.navShrinkControl.shrink();
+          } else if (typeof window.navShrinkControl.expand === 'function') {
+            window.navShrinkControl.expand();
+          }
+        }
       },
     });
   };
@@ -833,6 +922,7 @@ function initializeNavShrinkOnScroll() {
     isShrunk = true;
     accumulatedDelta = 0;
     targets.forEach(({ navWrap, target, isInner }) => {
+      target.dataset.navState = 'shrunk';
       const parentWidth = navWrap.parentElement ? navWrap.parentElement.clientWidth : 0;
       const targetWidth = parentWidth ? parentWidth * 0.5 : 0;
       gsap.to(target, {
@@ -850,6 +940,7 @@ function initializeNavShrinkOnScroll() {
     isShrunk = false;
     accumulatedDelta = 0;
     targets.forEach(({ navWrap, target, isInner }) => {
+      target.dataset.navState = 'wide';
       const parentWidth = navWrap.parentElement ? navWrap.parentElement.clientWidth : 0;
       const currentWidth = target.getBoundingClientRect().width;
       gsap.to(target, {
@@ -873,7 +964,14 @@ function initializeNavShrinkOnScroll() {
 
   window.navShrinkControl = {
     expand: animateExpand,
-    shrink: animateShrink
+    shrink: animateShrink,
+    setMenuOpen: (open) => {
+      window.navShrinkControl._menuOpen = open;
+    },
+    pauseScroll: (ms = 400) => {
+      window.navShrinkControl._ignoreScrollUntil = Date.now() + ms;
+    },
+    getState: () => (isShrunk ? 'shrunk' : 'wide')
   };
 
   const update = () => {
@@ -890,6 +988,11 @@ function initializeNavShrinkOnScroll() {
     }
     accumulatedDelta += delta;
 
+    if (window.navShrinkControl) {
+      if (window.navShrinkControl._menuOpen) return;
+      if (window.navShrinkControl._ignoreScrollUntil && Date.now() < window.navShrinkControl._ignoreScrollUntil) return;
+    }
+
     if (dir > 0 && !isShrunk && accumulatedDelta > TRIGGER_DISTANCE) {
       animateShrink();
     } else if (dir < 0 && isShrunk && accumulatedDelta < -TRIGGER_DISTANCE) {
@@ -903,6 +1006,363 @@ function initializeNavShrinkOnScroll() {
       requestAnimationFrame(update);
     }
   }, { passive: true });
+}
+
+// ================================================================================
+// 🏁 MARQUEE (data-marquee="track" / data-marquee="content")
+// ================================================================================
+function initMarquee() {
+  const tracks = Array.from(document.querySelectorAll('[data-marquee="track"]'));
+  if (tracks.length === 0) return;
+
+  if (typeof gsap === 'undefined') {
+    console.warn('⚠️ GSAP not loaded - marquee disabled');
+    return;
+  }
+
+  const prefersReducedMotion =
+    window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const getEffectiveWidth = (element) => {
+    if (!element) return 0;
+    let current = element;
+    while (current && current !== document.body) {
+      const width = current.getBoundingClientRect().width;
+      if (width) return width;
+      current = current.parentElement;
+    }
+    return window.innerWidth || 0;
+  };
+
+  tracks.forEach((track) => {
+    if (track.dataset.marqueeInitialized === 'true') return;
+    const content = track.querySelector('[data-marquee="content"]');
+    if (!content) {
+      console.warn('⚠️ Marquee track missing content', track);
+      return;
+    }
+
+    console.log('🧭 Marquee init', {
+      track,
+      content,
+      trackDisplay: window.getComputedStyle(track).display,
+      contentDisplay: window.getComputedStyle(content).display
+    });
+
+    const computedContentDisplay = window.getComputedStyle(content).display;
+    if (computedContentDisplay === 'contents') {
+      console.warn('⚠️ Marquee content is display: contents, forcing flex', content);
+      content.style.display = 'flex';
+      content.style.flexWrap = 'nowrap';
+    }
+
+    track.dataset.marqueeInitialized = 'true';
+    if (prefersReducedMotion) return;
+
+    const speed = parseFloat(track.dataset.marqueeSpeed) || 80;
+
+    const setupMarquee = () => {
+      const viewportWidth = getEffectiveWidth(track);
+      const contentWidth = getEffectiveWidth(content);
+      if (!viewportWidth || !contentWidth) {
+        console.warn('⚠️ Marquee widths invalid', { viewportWidth, contentWidth, track, content });
+        return;
+      }
+
+      if (track._marqueeTween) {
+        track._marqueeTween.kill();
+      }
+
+      const totalDistance = viewportWidth + contentWidth;
+      const startX = -contentWidth;
+      const endX = viewportWidth;
+      gsap.set(content, { x: startX });
+      console.log('📦 Marquee setup', {
+        viewportWidth,
+        contentWidth,
+        startX,
+        endX,
+        speed
+      });
+      const setOpacity = gsap.quickSetter(content, 'opacity');
+      const updateOpacity = () => {
+        const currentX = gsap.getProperty(content, 'x');
+        const contentCenter = currentX + contentWidth / 2;
+        const viewportCenter = viewportWidth / 2;
+        if (contentCenter <= viewportCenter) {
+          setOpacity(1);
+          return;
+        }
+        const fadeDistance = Math.max(120, viewportWidth * 0.25);
+        const progress = Math.min(1, (contentCenter - viewportCenter) / fadeDistance);
+        setOpacity(Math.max(0, 1 - progress));
+      };
+
+      updateOpacity();
+      track._marqueeTween = gsap.to(content, {
+        x: endX,
+        duration: totalDistance / speed,
+        ease: 'none',
+        repeat: -1,
+        onUpdate: updateOpacity
+      });
+    };
+
+    setupMarquee();
+
+    if (!track._marqueeResizeHandler) {
+      track._marqueeResizeHandler = () => {
+        if (track._marqueeResizeTimer) {
+          clearTimeout(track._marqueeResizeTimer);
+        }
+        track._marqueeResizeTimer = setTimeout(setupMarquee, 150);
+      };
+      window.addEventListener('resize', track._marqueeResizeHandler, { passive: true });
+    }
+  });
+}
+
+// ================================================================================
+// ✍️ TEXT TYPE ANIMATION (data-text="type")
+// ================================================================================
+function initTextType() {
+  const wrappers = Array.from(document.querySelectorAll('[data-text="type"]'));
+  if (wrappers.length === 0) return;
+
+  if (typeof gsap === 'undefined' || typeof TextPlugin === 'undefined') {
+    console.warn('⚠️ TextPlugin not loaded - text type animation disabled');
+    return;
+  }
+
+  gsap.registerPlugin(TextPlugin);
+
+  wrappers.forEach((wrapper) => {
+    if (wrapper.dataset.textTypeInitialized === 'true') return;
+    const target =
+      wrapper.querySelector('h1, h2, h3, h4, h5, h6, [data-text-target]') || wrapper;
+    if (!target) return;
+
+    wrapper.dataset.textTypeInitialized = 'true';
+
+    const categoryEl = wrapper.querySelector('[data-text="category"]');
+    const valueEl = wrapper.querySelector('[data-text="value"]');
+
+    const pairs = [
+      { category: 'Size', value: '2400 mm × 1700 mm' },
+      { category: 'Speed', value: '80 km/h' },
+      { category: 'Weight', value: '1,600 kg (armored)' },
+      { category: 'Range', value: '150 km plus' },
+      { category: 'Payload', value: '1,200 kg plus' },
+      { category: 'Climbing', value: '60 degree plus' },
+      { category: 'Drivetrain', value: 'Fully electric, 400 V' },
+      { category: 'Terrain', value: 'ATV / swimmable' },
+      { category: 'Tracks', value: 'Rubber' },
+      { category: 'Suspension', value: 'Full' },
+      { category: 'Heat emission', value: 'Close to 0 signature' },
+      { category: 'Acoustics', value: 'Close to 0 signature' }
+    ];
+
+    if (categoryEl && valueEl) {
+      const categoryTarget =
+        categoryEl.querySelector('h1, h2, h3, h4, h5, h6, [data-text-target]') || categoryEl;
+      const valueTarget =
+        valueEl.querySelector('h1, h2, h3, h4, h5, h6, [data-text-target]') || valueEl;
+
+      const normalizeText = (text) =>
+        String(text || '').replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+      categoryTarget.textContent = '';
+      valueTarget.textContent = '';
+      gsap.set([categoryEl, valueEl], { opacity: 1 });
+      categoryTarget.style.whiteSpace = 'nowrap';
+      valueTarget.style.whiteSpace = 'nowrap';
+
+      const ensureMinHeight = (element, measureEl) => {
+        if (!element || !measureEl) return;
+        const currentMin = parseFloat(element.style.minHeight || '0') || 0;
+        const measured = measureEl.getBoundingClientRect().height || 0;
+        if (measured > currentMin) {
+          element.style.minHeight = `${measured}px`;
+        }
+      };
+
+      const tl = gsap.timeline({ repeat: -1 });
+      tl.to({}, { duration: 0.8 });
+      pairs.forEach(({ category, value }) => {
+        const cleanCategory = normalizeText(category);
+        const cleanValue = normalizeText(value);
+        const categoryDuration = Math.max(0.25, cleanCategory.length * 0.02);
+        const valueDuration = Math.max(0.25, cleanValue.length * 0.015);
+        tl.to(categoryTarget, {
+          text: cleanCategory,
+          duration: categoryDuration,
+          ease: 'steps(12)',
+          onComplete: () => ensureMinHeight(categoryEl, categoryTarget)
+        })
+          .to(valueTarget, {
+            text: cleanValue,
+            duration: valueDuration,
+            ease: 'steps(14)',
+            onComplete: () => ensureMinHeight(valueEl, valueTarget)
+          }, `-=${Math.min(0.2, categoryDuration * 0.3)}`)
+          .to({}, { duration: 1.0 })
+          .to([categoryEl, valueEl], { opacity: 0, duration: 0.2, ease: 'none' })
+          .to([categoryEl, valueEl], { opacity: 1, duration: 0.01 });
+      });
+      return;
+    }
+
+    const words = ['payload', 'weight', 'range', 'speed'];
+    target.textContent = '';
+
+    const tl = gsap.timeline({ repeat: -1 });
+    words.forEach((word) => {
+      const typeDuration = Math.max(0.6, word.length * 0.08);
+      const eraseDuration = Math.max(0.4, word.length * 0.06);
+      tl.to(target, { text: word, duration: typeDuration, ease: 'none' })
+        .to({}, { duration: 0.6 })
+        .to(target, { text: '', duration: eraseDuration, ease: 'none' })
+        .to({}, { duration: 0.3 });
+    });
+  });
+}
+
+// ================================================================================
+// 🌑 RADIAL OVERLAY (data-overlay="radial")
+// ================================================================================
+function initRadialOverlay() {
+  const overlay = document.querySelector('[data-overlay="radial"]');
+  if (!overlay) return;
+  if (overlay.dataset.overlayInitialized === 'true') return;
+  overlay.dataset.overlayInitialized = 'true';
+
+  // Architecture trace:
+  // Input → output: pointer/timed-sweep updates targetX/Y → tick eases currentX/Y → CSS vars update gradient center.
+  // Consumers: CSS radial-gradient uses --overlay-x/--overlay-y; no other functions depend on output.
+  // File usage: only animations.js defines/uses initRadialOverlay.
+  // Example: sweep sets targetX 15→85, targetY 50; tick updates --overlay-x/--overlay-y each frame.
+  // System state: targetX/Y updated by pointer or sweep, currentX/Y eased; idle uses lastMoveTime.
+
+  const cssText =
+    'radial-gradient(circle at var(--overlay-x, 50%) var(--overlay-y, 50%), rgba(0,0,0,var(--overlay-center-alpha, 0)) 0%, rgba(0,0,0,var(--overlay-edge-alpha, 0.9)) 35%, rgba(0,0,0,var(--overlay-edge-strong-alpha, 0.95)) 60%)';
+  overlay.style.backgroundImage = cssText;
+
+  const prefersReducedMotion =
+    window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const isCoarsePointer =
+    window.matchMedia && (window.matchMedia('(pointer: coarse)').matches || window.matchMedia('(hover: none)').matches);
+
+  let currentX = 50;
+  let currentY = 50;
+  let targetX = 50;
+  let targetY = 50;
+  const jitterSeedX = Math.random() * 1000;
+  const jitterSeedY = Math.random() * 1000;
+  let lastMoveTime = Date.now();
+  let idleProgress = 0;
+
+  const setX = typeof gsap !== 'undefined'
+    ? gsap.quickSetter(overlay, '--overlay-x', '%')
+    : (value) => overlay.style.setProperty('--overlay-x', `${value}%`);
+  const setY = typeof gsap !== 'undefined'
+    ? gsap.quickSetter(overlay, '--overlay-y', '%')
+    : (value) => overlay.style.setProperty('--overlay-y', `${value}%`);
+  const setCenterAlpha = typeof gsap !== 'undefined'
+    ? gsap.quickSetter(overlay, '--overlay-center-alpha')
+    : (value) => overlay.style.setProperty('--overlay-center-alpha', value);
+  const setEdgeAlpha = typeof gsap !== 'undefined'
+    ? gsap.quickSetter(overlay, '--overlay-edge-alpha')
+    : (value) => overlay.style.setProperty('--overlay-edge-alpha', value);
+  const setEdgeStrongAlpha = typeof gsap !== 'undefined'
+    ? gsap.quickSetter(overlay, '--overlay-edge-strong-alpha')
+    : (value) => overlay.style.setProperty('--overlay-edge-strong-alpha', value);
+
+  setX(currentX);
+  setY(currentY);
+  setCenterAlpha(0);
+  setEdgeAlpha(0.9);
+  setEdgeStrongAlpha(0.95);
+
+  const updateTargetFromEvent = (event) => {
+    const x = (event.clientX / window.innerWidth) * 100;
+    const y = (event.clientY / window.innerHeight) * 100;
+    targetX = Math.max(0, Math.min(100, x));
+    targetY = Math.max(0, Math.min(100, y));
+    lastMoveTime = Date.now();
+  };
+
+  if (!prefersReducedMotion) {
+    if (isCoarsePointer && typeof gsap !== 'undefined') {
+      const sweepProxy = { x: 15, y: 50 };
+      gsap.timeline({ repeat: -1 })
+        .to(sweepProxy, {
+          x: 85,
+          duration: 3.0,
+          ease: 'power1.inOut',
+          onUpdate: () => {
+            targetX = sweepProxy.x;
+            targetY = sweepProxy.y;
+            lastMoveTime = Date.now();
+          }
+        })
+        .to({}, { duration: 0.7 })
+        .to(sweepProxy, {
+          x: 15,
+          duration: 3.0,
+          ease: 'power1.inOut',
+          onUpdate: () => {
+            targetX = sweepProxy.x;
+            targetY = sweepProxy.y;
+            lastMoveTime = Date.now();
+          }
+        })
+        .to({}, { duration: 0.7 });
+    }
+
+    const tick = () => {
+      const idleMs = Date.now() - lastMoveTime;
+      const isIdle = idleMs > 200;
+      if (isIdle) {
+        idleProgress = Math.min(1, idleProgress + 0.03);
+      } else {
+        idleProgress = Math.max(0, idleProgress - 0.12);
+      }
+
+      setCenterAlpha(idleProgress);
+      setEdgeAlpha(0.9 + 0.1 * idleProgress);
+      setEdgeStrongAlpha(0.95 + 0.05 * idleProgress);
+
+      const time = Date.now() / 1000;
+      const jitterAmount = 0.6;
+      const jitterX =
+        (Math.sin(time * 1.7 + jitterSeedX) + Math.sin(time * 0.9 + jitterSeedX * 0.7)) *
+        jitterAmount;
+      const jitterY =
+        (Math.sin(time * 1.3 + jitterSeedY) + Math.sin(time * 0.8 + jitterSeedY * 0.6)) *
+        jitterAmount;
+      const ease = 0.1 + Math.abs(Math.sin(time * 0.6)) * 0.06;
+      currentX += (targetX - currentX) * ease;
+      currentY += (targetY - currentY) * ease;
+      setX(currentX + jitterX);
+      setY(currentY + jitterY);
+    };
+
+    if (typeof gsap !== 'undefined') {
+      gsap.ticker.add(tick);
+    } else {
+      const rafTick = () => {
+        tick();
+        requestAnimationFrame(rafTick);
+      };
+      requestAnimationFrame(rafTick);
+    }
+
+    window.addEventListener('pointermove', updateTargetFromEvent, { passive: true });
+    window.addEventListener('touchmove', (event) => {
+      if (!event.touches || !event.touches[0]) return;
+      updateTargetFromEvent(event.touches[0]);
+    }, { passive: true });
+  }
 }
 
 // ================================================================================
@@ -1718,12 +2178,18 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
   console.log('📄 DOM already ready, initializing standalone auto-scroll...');
   initStandaloneAutoScroll();
   initLandingScrollOpacity();
+  initMarquee();
+  initTextType();
+  initRadialOverlay();
   initLidarScanners();
 } else {
   document.addEventListener('DOMContentLoaded', () => {
     console.log('📄 DOM Content Loaded (standalone), initializing auto-scroll...');
     initStandaloneAutoScroll();
     initLandingScrollOpacity();
+    initMarquee();
+    initTextType();
+    initRadialOverlay();
     initLidarScanners();
   });
 }
