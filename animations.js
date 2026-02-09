@@ -1150,15 +1150,15 @@ function initTextType() {
     const pairs = [
       { category: 'Size', value: '2400 mm × 1700 mm' },
       { category: 'Speed', value: '80 km/h' },
-      { category: 'Weight', value: '1,600 kg (armored)' },
+      { category: 'Weight', value: '1,600 kg / armored' },
       { category: 'Range', value: '150 km plus' },
       { category: 'Payload', value: '1,200 kg plus' },
       { category: 'Climbing', value: '60 degree plus' },
-      { category: 'Drivetrain', value: 'Fully electric, 400 V' },
+      { category: 'Drivetrain', value: 'Fully electric / 400 V' },
       { category: 'Terrain', value: 'ATV / swimmable' },
       { category: 'Tracks', value: 'Rubber' },
       { category: 'Suspension', value: 'Full' },
-      { category: 'Heat emission', value: 'Close to 0 signature' },
+      { category: 'Heat', value: 'Close to 0 signature' },
       { category: 'Acoustics', value: 'Close to 0 signature' }
     ];
 
