@@ -1162,67 +1162,56 @@ function initTextType() {
       { category: 'Acoustics', value: 'Close to 0 signature' }
     ];
 
-    if (categoryEl && valueEl) {
-      const categoryTarget =
-        categoryEl.querySelector('h1, h2, h3, h4, h5, h6, [data-text-target]') || categoryEl;
-      const valueTarget =
-        valueEl.querySelector('h1, h2, h3, h4, h5, h6, [data-text-target]') || valueEl;
-
-      const normalizeText = (text) =>
-        String(text || '').replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
-
-      categoryTarget.textContent = '';
-      valueTarget.textContent = '';
-      gsap.set([categoryEl, valueEl], { opacity: 1 });
-      categoryTarget.style.whiteSpace = 'nowrap';
-      valueTarget.style.whiteSpace = 'nowrap';
-
-      const ensureMinHeight = (element, measureEl) => {
-        if (!element || !measureEl) return;
-        const currentMin = parseFloat(element.style.minHeight || '0') || 0;
-        const measured = measureEl.getBoundingClientRect().height || 0;
-        if (measured > currentMin) {
-          element.style.minHeight = `${measured}px`;
-        }
-      };
-
-      const tl = gsap.timeline({ repeat: -1 });
-      tl.to({}, { duration: 0.8 });
-      pairs.forEach(({ category, value }) => {
-        const cleanCategory = normalizeText(category);
-        const cleanValue = normalizeText(value);
-        const categoryDuration = Math.max(0.25, cleanCategory.length * 0.02);
-        const valueDuration = Math.max(0.25, cleanValue.length * 0.015);
-        tl.to(categoryTarget, {
-          text: cleanCategory,
-          duration: categoryDuration,
-          ease: 'steps(12)',
-          onComplete: () => ensureMinHeight(categoryEl, categoryTarget)
-        })
-          .to(valueTarget, {
-            text: cleanValue,
-            duration: valueDuration,
-            ease: 'steps(14)',
-            onComplete: () => ensureMinHeight(valueEl, valueTarget)
-          }, `-=${Math.min(0.2, categoryDuration * 0.3)}`)
-          .to({}, { duration: 1.0 })
-          .to([categoryEl, valueEl], { opacity: 0, duration: 0.2, ease: 'none' })
-          .to([categoryEl, valueEl], { opacity: 1, duration: 0.01 });
-      });
+    if (!categoryEl || !valueEl) {
+      console.warn('⚠️ data-text="type" wrapper missing [data-text="category"] or [data-text="value"] — skipping');
       return;
     }
 
-    const words = ['payload', 'weight', 'range', 'speed'];
-    target.textContent = '';
+    const categoryTarget =
+      categoryEl.querySelector('h1, h2, h3, h4, h5, h6, [data-text-target]') || categoryEl;
+    const valueTarget =
+      valueEl.querySelector('h1, h2, h3, h4, h5, h6, [data-text-target]') || valueEl;
+
+    const normalizeText = (text) =>
+      String(text || '').replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+    categoryTarget.textContent = '';
+    valueTarget.textContent = '';
+    gsap.set([categoryEl, valueEl], { opacity: 1 });
+    categoryTarget.style.whiteSpace = 'nowrap';
+    valueTarget.style.whiteSpace = 'nowrap';
+
+    const ensureMinHeight = (element, measureEl) => {
+      if (!element || !measureEl) return;
+      const currentMin = parseFloat(element.style.minHeight || '0') || 0;
+      const measured = measureEl.getBoundingClientRect().height || 0;
+      if (measured > currentMin) {
+        element.style.minHeight = `${measured}px`;
+      }
+    };
 
     const tl = gsap.timeline({ repeat: -1 });
-    words.forEach((word) => {
-      const typeDuration = Math.max(0.6, word.length * 0.08);
-      const eraseDuration = Math.max(0.4, word.length * 0.06);
-      tl.to(target, { text: word, duration: typeDuration, ease: 'none' })
-        .to({}, { duration: 0.6 })
-        .to(target, { text: '', duration: eraseDuration, ease: 'none' })
-        .to({}, { duration: 0.3 });
+    tl.to({}, { duration: 0.8 });
+    pairs.forEach(({ category, value }) => {
+      const cleanCategory = normalizeText(category);
+      const cleanValue = normalizeText(value);
+      const categoryDuration = Math.max(0.25, cleanCategory.length * 0.02);
+      const valueDuration = Math.max(0.25, cleanValue.length * 0.015);
+      tl.to(categoryTarget, {
+        text: cleanCategory,
+        duration: categoryDuration,
+        ease: 'steps(12)',
+        onComplete: () => ensureMinHeight(categoryEl, categoryTarget)
+      })
+        .to(valueTarget, {
+          text: cleanValue,
+          duration: valueDuration,
+          ease: 'steps(14)',
+          onComplete: () => ensureMinHeight(valueEl, valueTarget)
+        }, `-=${Math.min(0.2, categoryDuration * 0.3)}`)
+        .to({}, { duration: 1.0 })
+        .to([categoryEl, valueEl], { opacity: 0, duration: 0.2, ease: 'none' })
+        .to([categoryEl, valueEl], { opacity: 1, duration: 0.01 });
     });
   });
 }
