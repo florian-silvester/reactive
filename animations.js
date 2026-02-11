@@ -1272,18 +1272,28 @@ function initRadialOverlay() {
   setEdgeAlpha(0.9);
   setEdgeStrongAlpha(0.95);
 
+  // Desktop idle sweep state
+  let desktopSweepTl = null;
+  let desktopSweepActive = false;
+  const DESKTOP_IDLE_DELAY = 2000; // ms before sweep starts
+
   const updateTargetFromEvent = (event) => {
     const x = (event.clientX / window.innerWidth) * 100;
     const y = (event.clientY / window.innerHeight) * 100;
     targetX = Math.max(0, Math.min(100, x));
     targetY = Math.max(0, Math.min(100, y));
     lastMoveTime = Date.now();
+    // Pause desktop sweep when user moves mouse
+    if (desktopSweepActive && desktopSweepTl) {
+      desktopSweepTl.pause();
+      desktopSweepActive = false;
+    }
   };
 
   if (!prefersReducedMotion) {
-    if (isCoarsePointer && typeof gsap !== 'undefined') {
+    if (typeof gsap !== 'undefined') {
       const sweepProxy = { x: 15, y: 50 };
-      gsap.timeline({ repeat: -1 })
+      const sweepTl = gsap.timeline({ repeat: -1, paused: !isCoarsePointer })
         .to(sweepProxy, {
           x: 85,
           duration: 3.0,
@@ -1291,7 +1301,7 @@ function initRadialOverlay() {
           onUpdate: () => {
             targetX = sweepProxy.x;
             targetY = sweepProxy.y;
-            lastMoveTime = Date.now();
+            if (isCoarsePointer) lastMoveTime = Date.now();
           }
         })
         .to({}, { duration: 0.7 })
@@ -1302,15 +1312,29 @@ function initRadialOverlay() {
           onUpdate: () => {
             targetX = sweepProxy.x;
             targetY = sweepProxy.y;
-            lastMoveTime = Date.now();
+            if (isCoarsePointer) lastMoveTime = Date.now();
           }
         })
         .to({}, { duration: 0.7 });
+
+      if (!isCoarsePointer) {
+        // Desktop: store sweep timeline, start paused
+        desktopSweepTl = sweepTl;
+      }
     }
 
     const tick = () => {
       const idleMs = Date.now() - lastMoveTime;
       const isIdle = idleMs > 200;
+
+      // Desktop idle sweep: start after 2s of no mouse movement
+      if (!isCoarsePointer && desktopSweepTl) {
+        if (idleMs > DESKTOP_IDLE_DELAY && !desktopSweepActive) {
+          desktopSweepTl.resume();
+          desktopSweepActive = true;
+        }
+      }
+
       if (isIdle) {
         idleProgress = Math.min(1, idleProgress + 0.03);
       } else {
