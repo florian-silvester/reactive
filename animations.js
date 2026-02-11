@@ -1273,10 +1273,13 @@ function initRadialOverlay() {
   setEdgeStrongAlpha(0.95);
 
   // Desktop idle sweep state
-  let desktopSweepTl = null;
   let desktopSweepActive = false;
-  let idleSinceMs = 0; // tracks real user idle time (unaffected by sweep)
+  let desktopSweepStartTime = 0;
+  let lastUserInputTime = Date.now();
   const DESKTOP_IDLE_DELAY = 2000; // ms before sweep starts
+  const DESKTOP_SWEEP_FORWARD_MS = 3000;
+  const DESKTOP_SWEEP_PAUSE_MS = 700;
+  const DESKTOP_SWEEP_TOTAL_MS = (DESKTOP_SWEEP_FORWARD_MS * 2) + (DESKTOP_SWEEP_PAUSE_MS * 2);
 
   const updateTargetFromEvent = (event) => {
     const x = (event.clientX / window.innerWidth) * 100;
@@ -1284,18 +1287,17 @@ function initRadialOverlay() {
     targetX = Math.max(0, Math.min(100, x));
     targetY = Math.max(0, Math.min(100, y));
     lastMoveTime = Date.now();
-    // Pause desktop sweep when user moves mouse
-    if (desktopSweepActive && desktopSweepTl) {
-      desktopSweepTl.pause();
+    lastUserInputTime = Date.now();
+    // Pause desktop sweep when user moves pointer
+    if (desktopSweepActive) {
       desktopSweepActive = false;
-      idleSinceMs = 0;
     }
   };
 
   if (!prefersReducedMotion) {
-    if (typeof gsap !== 'undefined') {
+    if (isCoarsePointer && typeof gsap !== 'undefined') {
       const sweepProxy = { x: 15, y: 50 };
-      const sweepTl = gsap.timeline({ repeat: -1, paused: !isCoarsePointer })
+      gsap.timeline({ repeat: -1 })
         .to(sweepProxy, {
           x: 85,
           duration: 3.0,
@@ -1318,29 +1320,43 @@ function initRadialOverlay() {
           }
         })
         .to({}, { duration: 0.7 });
-
-      if (!isCoarsePointer) {
-        // Desktop: store sweep timeline, start paused
-        desktopSweepTl = sweepTl;
-      }
     }
 
     const tick = () => {
       const idleMs = Date.now() - lastMoveTime;
       const isIdle = idleMs > 200;
 
-      // Track real user idle separately (sweep resets lastMoveTime)
-      if (desktopSweepActive) {
-        idleSinceMs += 16; // approximate frame time
-      } else {
-        idleSinceMs = idleMs;
-      }
+      // Desktop idle sweep: run automatically after 2s without user input
+      if (!isCoarsePointer) {
+        const userIdleMs = Date.now() - lastUserInputTime;
+        if (userIdleMs > DESKTOP_IDLE_DELAY) {
+          if (!desktopSweepActive) {
+            desktopSweepActive = true;
+            desktopSweepStartTime = Date.now();
+          }
+        } else if (desktopSweepActive) {
+          desktopSweepActive = false;
+        }
 
-      // Desktop idle sweep: start after 2s of no real user input
-      if (!isCoarsePointer && desktopSweepTl) {
-        if (idleSinceMs > DESKTOP_IDLE_DELAY && !desktopSweepActive) {
-          desktopSweepTl.resume();
-          desktopSweepActive = true;
+        if (desktopSweepActive) {
+          const phase = (Date.now() - desktopSweepStartTime) % DESKTOP_SWEEP_TOTAL_MS;
+          if (phase < DESKTOP_SWEEP_FORWARD_MS) {
+            // 15 -> 85
+            targetX = 15 + (70 * (phase / DESKTOP_SWEEP_FORWARD_MS));
+          } else if (phase < DESKTOP_SWEEP_FORWARD_MS + DESKTOP_SWEEP_PAUSE_MS) {
+            // hold at right edge
+            targetX = 85;
+          } else if (phase < (DESKTOP_SWEEP_FORWARD_MS * 2) + DESKTOP_SWEEP_PAUSE_MS) {
+            // 85 -> 15
+            const backPhase = phase - (DESKTOP_SWEEP_FORWARD_MS + DESKTOP_SWEEP_PAUSE_MS);
+            targetX = 85 - (70 * (backPhase / DESKTOP_SWEEP_FORWARD_MS));
+          } else {
+            // hold at left edge
+            targetX = 15;
+          }
+          targetY = 50;
+          // Keep overlay lit while synthetic sweep is active
+          lastMoveTime = Date.now();
         }
       }
 
