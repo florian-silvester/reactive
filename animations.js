@@ -1275,6 +1275,7 @@ function initRadialOverlay() {
   // Desktop idle sweep state
   let desktopSweepTl = null;
   let desktopSweepActive = false;
+  let idleSinceMs = 0; // tracks real user idle time (unaffected by sweep)
   const DESKTOP_IDLE_DELAY = 2000; // ms before sweep starts
 
   const updateTargetFromEvent = (event) => {
@@ -1287,6 +1288,7 @@ function initRadialOverlay() {
     if (desktopSweepActive && desktopSweepTl) {
       desktopSweepTl.pause();
       desktopSweepActive = false;
+      idleSinceMs = 0;
     }
   };
 
@@ -1301,7 +1303,7 @@ function initRadialOverlay() {
           onUpdate: () => {
             targetX = sweepProxy.x;
             targetY = sweepProxy.y;
-            if (isCoarsePointer) lastMoveTime = Date.now();
+            lastMoveTime = Date.now();
           }
         })
         .to({}, { duration: 0.7 })
@@ -1312,7 +1314,7 @@ function initRadialOverlay() {
           onUpdate: () => {
             targetX = sweepProxy.x;
             targetY = sweepProxy.y;
-            if (isCoarsePointer) lastMoveTime = Date.now();
+            lastMoveTime = Date.now();
           }
         })
         .to({}, { duration: 0.7 });
@@ -1327,15 +1329,22 @@ function initRadialOverlay() {
       const idleMs = Date.now() - lastMoveTime;
       const isIdle = idleMs > 200;
 
-      // Desktop idle sweep: start after 2s of no mouse movement
+      // Track real user idle separately (sweep resets lastMoveTime)
+      if (desktopSweepActive) {
+        idleSinceMs += 16; // approximate frame time
+      } else {
+        idleSinceMs = idleMs;
+      }
+
+      // Desktop idle sweep: start after 2s of no real user input
       if (!isCoarsePointer && desktopSweepTl) {
-        if (idleMs > DESKTOP_IDLE_DELAY && !desktopSweepActive) {
+        if (idleSinceMs > DESKTOP_IDLE_DELAY && !desktopSweepActive) {
           desktopSweepTl.resume();
           desktopSweepActive = true;
         }
       }
 
-      if (isIdle) {
+      if (isIdle && !desktopSweepActive) {
         idleProgress = Math.min(1, idleProgress + 0.03);
       } else {
         idleProgress = Math.max(0, idleProgress - 0.12);
