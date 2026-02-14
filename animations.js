@@ -1280,6 +1280,8 @@ function initRadialOverlay() {
   const DESKTOP_SWEEP_FORWARD_MS = 3000;
   const DESKTOP_SWEEP_PAUSE_MS = 700;
   const DESKTOP_SWEEP_TOTAL_MS = (DESKTOP_SWEEP_FORWARD_MS * 2) + (DESKTOP_SWEEP_PAUSE_MS * 2);
+  // Cap idle darkening so spotlight never fades to full black
+  const IDLE_DARKNESS_MAX = 0.42;
 
   const updateTargetFromEvent = (event) => {
     const x = (event.clientX / window.innerWidth) * 100;
@@ -1361,7 +1363,7 @@ function initRadialOverlay() {
       }
 
       if (isIdle && !desktopSweepActive) {
-        idleProgress = Math.min(1, idleProgress + 0.03);
+        idleProgress = Math.min(IDLE_DARKNESS_MAX, idleProgress + 0.03);
       } else {
         idleProgress = Math.max(0, idleProgress - 0.12);
       }
