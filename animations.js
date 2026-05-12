@@ -356,6 +356,11 @@ if (!window.barbaInitialized) {
             initLidarScanners();
           }, 700);
 
+          // Initialize Disperse grid
+          setTimeout(() => {
+            initDisperse();
+          }, 720);
+
           // Transition-1 exit animation after enter
           if (hasTransition1()) {
             playTransition1Out();
@@ -415,6 +420,11 @@ if (!window.barbaInitialized) {
     setTimeout(() => {
       initLidarScanners();
     }, 1200);
+
+    // Initialize Disperse grid
+    setTimeout(() => {
+      initDisperse();
+    }, 1220);
 
     // Transition-1 exit animation on initial load
     if (hasTransition1()) {
@@ -921,44 +931,16 @@ function initializeNavShrinkOnScroll() {
   const animateShrink = () => {
     isShrunk = true;
     accumulatedDelta = 0;
-    targets.forEach(({ navWrap, target, isInner }) => {
+    targets.forEach(({ target }) => {
       target.dataset.navState = 'shrunk';
-      const parentWidth = navWrap.parentElement ? navWrap.parentElement.clientWidth : 0;
-      const targetWidth = parentWidth ? parentWidth * 0.5 : 0;
-      gsap.to(target, {
-        width: targetWidth ? `${targetWidth}px` : '50%',
-        maxWidth: targetWidth ? `${targetWidth}px` : '50%',
-        ...(isInner ? {} : { flexBasis: targetWidth ? `${targetWidth}px` : '50%' }),
-        duration: 0.25,
-        ease: 'power2.out',
-        overwrite: 'auto',
-      });
     });
   };
 
   const animateExpand = () => {
     isShrunk = false;
     accumulatedDelta = 0;
-    targets.forEach(({ navWrap, target, isInner }) => {
+    targets.forEach(({ target }) => {
       target.dataset.navState = 'wide';
-      const parentWidth = navWrap.parentElement ? navWrap.parentElement.clientWidth : 0;
-      const currentWidth = target.getBoundingClientRect().width;
-      gsap.to(target, {
-        width: parentWidth ? `${parentWidth}px` : '100%',
-        maxWidth: parentWidth ? `${parentWidth}px` : '100%',
-        ...(isInner ? {} : { flexBasis: parentWidth ? `${parentWidth}px` : '100%' }),
-        duration: 0.45,
-        ease: 'power3.out',
-        overwrite: 'auto',
-        onStart: () => {
-          // lock current width to avoid snap before tween
-          target.style.width = `${currentWidth}px`;
-          target.style.maxWidth = `${currentWidth}px`;
-          if (!isInner) {
-            target.style.flexBasis = `${currentWidth}px`;
-          }
-        }
-      });
     });
   };
 
@@ -1571,7 +1553,8 @@ async function initLidarScanners() {
       variantAttr && variantAttr.toLowerCase() === 'rings';
     const isMulti =
       variantAttr && variantAttr.toLowerCase() === 'multi';
-    const POINT_SIZE = isZoomed ? 0.22 : 0.12;
+    // Pixel-based sizes (sizeAttenuation:false) — consistent regardless of canvas size
+    const POINT_SIZE = 1;
     const TOP_VIEW_HEIGHT = isZoomed ? 30 : 50;
     const allowDrive = (!isZoomed || isLandscape || isMulti) && !isRings;
     const HEIGHT_SCALE = isLandscape ? 0.35 : 1;
@@ -1881,30 +1864,44 @@ async function initLidarScanners() {
       const material = new THREE.PointsMaterial({
         size: POINT_SIZE,
         vertexColors: true,
-        transparent: true,
-        opacity: 0.9,
-        sizeAttenuation: true
+        transparent: false,
+        opacity: 1,
+        sizeAttenuation: false
       });
       scannedPoints = new THREE.Points(geometry, material);
       scene.add(scannedPoints);
       visiblePoints = 0;
     }
 
+    const SCAN_BEAM_PIXELS = isZoomed ? 3 : 2;
+
+    function updateScanBeamThickness() {
+      if (!scanBeam || !renderer || !camera) return;
+      const canvasHeight = renderer.domElement.clientHeight || 1;
+      const fovRad = camera.fov * Math.PI / 180;
+      const camDist = camera.position.length();
+      const worldThickness =
+        (SCAN_BEAM_PIXELS / canvasHeight) * 2 * camDist * Math.tan(fovRad / 2);
+      scanBeam.scale.z = Math.max(worldThickness, 0.001);
+    }
+
     function createScanBeam() {
-      const geometry = new THREE.BufferGeometry();
-      const vertices = new Float32Array(6);
-      vertices[0] = 0; vertices[1] = 0; vertices[2] = 0;
-      vertices[3] = 0; vertices[4] = 0; vertices[5] = MAX_RANGE;
-      geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
-      const material = new THREE.LineBasicMaterial({
+      // Thin quad lying on X-Z plane, extending from origin in +X (initial orientation)
+      // Rotated each frame via scanBeam.rotation.y to track scanAngle
+      const geometry = new THREE.PlaneGeometry(MAX_RANGE, 1);
+      geometry.translate(MAX_RANGE / 2, 0, 0); // origin at one end
+      geometry.rotateX(-Math.PI / 2);          // lay flat (Y → Z)
+      const material = new THREE.MeshBasicMaterial({
         color: 0xffffff,
         transparent: true,
         opacity: 0.6,
-        linewidth: 2
+        side: THREE.DoubleSide,
+        depthWrite: false
       });
-      scanBeam = new THREE.Line(geometry, material);
+      scanBeam = new THREE.Mesh(geometry, material);
       scene.add(scanBeam);
       scanBeam.visible = false;
+      updateScanBeamThickness();
     }
 
     function updateScannedPoints() {
@@ -2032,15 +2029,7 @@ async function initLidarScanners() {
           if (allowDrive) {
             vehicleZ += DRIVE_SPEED;
           }
-          const beamEnd = new THREE.Vector3(
-            Math.cos(scanAngle) * MAX_RANGE,
-            0,
-            Math.sin(scanAngle) * MAX_RANGE
-          );
-          const beamPositions = scanBeam.geometry.attributes.position.array;
-          beamPositions[3] = beamEnd.x;
-          beamPositions[5] = beamEnd.z;
-          scanBeam.geometry.attributes.position.needsUpdate = true;
+          scanBeam.rotation.y = -scanAngle;
           scanBeam.visible = true;
           appendCurrentScanSlice();
           if (scanAngle >= Math.PI * 2) {
@@ -2065,15 +2054,7 @@ async function initLidarScanners() {
           if (!isRings && morphTick % 3 === 0) {
             morphTerrainPoints();
           }
-          const beamEnd = new THREE.Vector3(
-            Math.cos(scanAngle) * MAX_RANGE,
-            0,
-            Math.sin(scanAngle) * MAX_RANGE
-          );
-          const beamPositions = scanBeam.geometry.attributes.position.array;
-          beamPositions[3] = beamEnd.x;
-          beamPositions[5] = beamEnd.z;
-          scanBeam.geometry.attributes.position.needsUpdate = true;
+          scanBeam.rotation.y = -scanAngle;
           scanBeam.visible = true;
           updateScannedPoints();
           fadePoints();
@@ -2142,6 +2123,7 @@ async function initLidarScanners() {
         renderer.setSize(width, height);
         camera.aspect = width / height;
         camera.updateProjectionMatrix();
+        updateScanBeamThickness();
       };
       resize();
       const ro = new ResizeObserver(resize);
@@ -2213,6 +2195,602 @@ async function initLidarScanners() {
   });
 }
 
+// ════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════════
+// 💥 DISPERSE GRID  ── new animation
+// ════════════════════════════════════════════════════════════════════════════════
+// Scroll-linked 3-stage animation that runs on any [data-disperse="section"]
+// holding exactly 16 [data-disperse="cell"] children.
+//
+//   Stage 1: 2×2 grid of 4 "master" cells (15vw each)            (cells 1,3,9,11)
+//   Stage 2: burst — replicate into 4×4 grid of 16 cells (7.5vw)
+//   Stage 3: disperse — cells scatter into viewport quadrants with jitter
+//   Tail:    entire section translates up off-screen before pin release
+//
+// WEBFLOW MARKUP:
+//   <section data-disperse="section">
+//     [optional] <div data-disperse="bg"><img ...></div>      ← fades in stage 3
+//     [optional] <div data-disperse="bounds" class="u-container">  ← sets grid width
+//                  (any Lumos container or fixed-width element)
+//     <div data-disperse="cell"> … your image + text … </div>   × 16 cells total
+//   </section>
+//
+// If a [data-disperse="bounds"] element is present, the 2×2 and 4×4 grids fit
+// exactly within its width (stage 3 disperse still spreads across the full
+// section / viewport). If absent, the section's own width is used.
+//
+// CELLS:
+//   - Tag with data-disperse="cell" on the wrapper div (NOT the <img>).
+//     Everything inside moves/scales together.
+//   - Cells are absolutely-positioned at runtime; any Webflow grid/flex on
+//     the section is overridden.
+//   - Cell INTERNALS (img/text) must scale relatively — image width:100%,
+//     text in em/% — so they resize with the cell wrapper.
+//   - MASTERS: by default, cells at document positions 1, 3, 9, 11 (the
+//     "top-left of each 2×2 quadrant" in a 4×4 grid).
+//     To override explicitly: tag those 4 with data-disperse="cell-master".
+//
+// DEPENDENCIES: GSAP (loaded by Webflow) + ScrollTrigger (loaded on demand here).
+// ════════════════════════════════════════════════════════════════════════════════
+
+function loadScrollTrigger() {
+  return new Promise((resolve, reject) => {
+    if (typeof ScrollTrigger !== 'undefined') {
+      try { gsap.registerPlugin(ScrollTrigger); } catch (e) {}
+      console.log('✅ ScrollTrigger already loaded (skipping CDN fetch)');
+      resolve();
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js';
+    script.onload = () => {
+      if (typeof ScrollTrigger !== 'undefined') {
+        gsap.registerPlugin(ScrollTrigger);
+        console.log('✅ ScrollTrigger loaded and registered');
+        resolve();
+      } else {
+        reject('ScrollTrigger not found after load');
+      }
+    };
+    script.onerror = () => reject('Failed to load ScrollTrigger');
+    document.head.appendChild(script);
+  });
+}
+
+function injectDisperseStyles() {
+  if (document.getElementById('disperse-styles')) return;
+  const style = document.createElement('style');
+  style.id = 'disperse-styles';
+  style.textContent = `
+    /* No !important on position — ScrollTrigger needs to flip it to fixed
+       during pin, and inline pin styles must be allowed to win. */
+    [data-disperse="section"] {
+      position: relative;
+      width: 100vw !important;
+      height: 100vh !important;
+      max-width: none !important;
+      max-height: none !important;
+      min-height: 100vh !important;
+      overflow: hidden !important;
+      display: block !important;
+    }
+    /* Use !important to override Lumos utility classes like u-display-contents
+       which would otherwise neutralize absolute positioning on the cell wrapper. */
+    [data-disperse="cell"],
+    [data-disperse="cell-master"] {
+      display: block !important;
+      position: absolute !important;
+      left: 50%;
+      top: 50%;
+      transform-origin: center center;
+      will-change: transform;
+      opacity: 0;
+    }
+    /* Ensure media inside the cell fills the cell wrapper, so the image
+       scales as the cell resizes from 15vw → 7.5vw → final size. */
+    [data-disperse="cell"] img,
+    [data-disperse="cell-master"] img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    [data-disperse="bg"] {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      opacity: 0;
+      pointer-events: none;
+      z-index: 0;
+    }
+    [data-disperse="bg"] img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+// Find a Lenis-like smooth-scroll instance on the page (Lumos's data-smooth-scroll
+// initializes one but doesn't always expose it under a predictable name).
+function findSmoothScroller() {
+  const candidates = [
+    window.lenis, window.Lenis, window.lumosLenis, window._lenis,
+    window.smoothScroll, window.scroll, window.lumos
+  ].filter(Boolean);
+  for (const c of candidates) {
+    if (c && typeof c.on === 'function' && typeof c.raf === 'function') return c;
+  }
+  // Last resort — scan window globals for anything with Lenis's shape
+  try {
+    for (const key of Object.keys(window)) {
+      const v = window[key];
+      if (v && typeof v === 'object' &&
+          typeof v.on === 'function' &&
+          typeof v.raf === 'function' &&
+          'scroll' in v) {
+        return v;
+      }
+    }
+  } catch (e) {}
+  return null;
+}
+
+function integrateSmoothScrollWithScrollTrigger() {
+  if (window._dispersScrollIntegrated) return;
+  const lenis = findSmoothScroller();
+  if (lenis) {
+    window._dispersScrollIntegrated = true;
+    lenis.on('scroll', ScrollTrigger.update);
+    gsap.ticker.add((time) => lenis.raf(time * 1000));
+    gsap.ticker.lagSmoothing(0);
+    console.log('🔗 DISPERSE: integrated ScrollTrigger with detected smooth-scroll instance');
+    return true;
+  }
+  // Fallback: ask ScrollTrigger to take over scroll normalization itself.
+  if (typeof ScrollTrigger.normalizeScroll === 'function') {
+    ScrollTrigger.normalizeScroll(true);
+    window._dispersScrollIntegrated = true;
+    console.log('🔗 DISPERSE: no smooth-scroll instance found, enabled ScrollTrigger.normalizeScroll instead');
+    return true;
+  }
+  return false;
+}
+
+async function initDisperse() {
+  const sections = document.querySelectorAll('[data-disperse="section"]');
+  if (sections.length === 0) return;
+
+  try {
+    await loadScrollTrigger();
+  } catch (err) {
+    console.error('❌ DISPERSE: failed to load ScrollTrigger', err);
+    return;
+  }
+
+  // Smooth-scroll integration disabled for now — re-enable if pin fails on a
+  // page that uses Webflow/Lumos data-smooth-scroll="true".
+  // if (document.body.dataset.smoothScroll === 'true' ||
+  //     document.documentElement.dataset.smoothScroll === 'true') {
+  //   integrateSmoothScrollWithScrollTrigger();
+  // }
+
+  injectDisperseStyles();
+
+  sections.forEach((section) => {
+    if (section.dataset.disperseInitialized === 'true') return;
+    section.dataset.disperseInitialized = 'true';
+
+    // Find cells in document order — both "cell" and "cell-master" variants
+    const cells = Array.from(section.querySelectorAll(
+      '[data-disperse="cell"], [data-disperse="cell-master"]'
+    ));
+    if (cells.length !== 16) {
+      console.warn(`⚠️ DISPERSE: expected 16 cells, got ${cells.length}`, section);
+      return;
+    }
+
+    // Optional bounds element — its width sizes the 2×2 and 4×4 grids.
+    // Stage 3 disperse still scatters across the full section (viewport).
+    // If absent, falls back to the section's own width.
+    const boundsEl = section.querySelector('[data-disperse="bounds"]');
+
+    // Cells must be DIRECT children of the section so absolute positioning
+    // anchors to the section, not to an intermediate position:relative wrapper
+    // (e.g. Lumos's u-position-relative). If not, hoist them.
+    const nonDirect = cells.filter(c => c.parentElement !== section);
+    if (nonDirect.length > 0) {
+      console.warn(
+        `⚠️ DISPERSE: ${nonDirect.length}/${cells.length} cells are nested inside ` +
+        `wrapper elements — hoisting them to be direct children of the section. ` +
+        `For predictable layout, structure as: <section data-disperse="section"> ` +
+        `→ 16 × <div data-disperse="cell"> as direct children (no Lumos grid/column wrappers).`
+      );
+      cells.forEach(c => { if (c.parentElement !== section) section.appendChild(c); });
+    }
+
+    const bg = section.querySelector('[data-disperse="bg"]');
+
+    // ─── CONFIG (hardcoded — defaults from the tuned demo) ───────────────
+    const COLS = 4, ROWS = 4, N = 16;
+    // The 2×2 and 4×4 grids fit the bounds element exactly: cells fill
+    // remaining horizontal space after the Lumos gutter. Cell height follows
+    // the first Webflow media wrapper's aspect-ratio (16 / 9 by default).
+    const DEFAULT_ASPECT_RATIO = 16 / 9;
+    const STAGGER        = 0.02;
+    const SPREAD         = 12;
+    const SIZE_MIN       = 10;
+    const SIZE_MAX       = 20;
+    const EASE           = 'expo.inOut';
+    // ─── Demo "triggered" defaults (verbatim) ────────────────────
+    const PACE                = 1500;
+    const HOLD_START          = 0;
+    const HOLD_MID            = 0.4;
+    const HOLD_END            = 0;
+    const TAIL_HOLD           = 0.5;
+    const STAGE1_DWELL        = 0.15;
+    const BURST_PLAY          = 0.7;
+    const TRIGGERED_DURATION  = 1.2;
+    const SEED                = 17;
+
+    // ─── MASTER DETECTION ─────────────────────────────────────────────────
+    // If any cell carries data-disperse="cell-master", use those; otherwise
+    // fall back to document positions 0, 2, 8, 10 (top-left of each quadrant).
+    const explicit = cells.map(c => c.getAttribute('data-disperse') === 'cell-master');
+    const hasExplicit = explicit.some(Boolean);
+    const isMaster = (i) =>
+      hasExplicit ? explicit[i] : (i === 0 || i === 2 || i === 8 || i === 10);
+
+    // ─── SEEDED RANDOM (stable jitter across reloads) ─────────────────────
+    let _seed = SEED;
+    const rand = () => { _seed = (_seed * 9301 + 49297) % 233280; return _seed / 233280; };
+    const rng = (a, b) => a + rand() * (b - a);
+
+    // ─── STAGE 3 END POSITIONS ────────────────────────────────────────────
+    let endStates = [];
+    const computeEndStates = () => {
+      _seed = SEED; // reset for deterministic positions
+      endStates = Array.from({ length: N }, (_, i) => {
+        const col = i % COLS;
+        const row = Math.floor(i / COLS);
+        const anchorX = (col + 0.5) * (100 / COLS);
+        const anchorY = (row + 0.5) * (100 / ROWS);
+        return {
+          x: anchorX + rng(-SPREAD, SPREAD),
+          y: anchorY + rng(-SPREAD, SPREAD),
+          size: rng(SIZE_MIN, SIZE_MAX)
+        };
+      });
+    };
+
+    // Read the current bounds width — falls back to the section's width.
+    const getBoundsWidth = () =>
+      (boundsEl && boundsEl.getBoundingClientRect().width) ||
+      section.getBoundingClientRect().width ||
+      window.innerWidth;
+
+    const resolveCssLengthPx = (value, contextEl = section) => {
+      const raw = String(value || '').trim();
+      if (!raw || raw === 'normal') return 0;
+
+      const probe = document.createElement('div');
+      probe.style.position = 'absolute';
+      probe.style.visibility = 'hidden';
+      probe.style.pointerEvents = 'none';
+      probe.style.width = raw;
+      contextEl.appendChild(probe);
+      const px = probe.getBoundingClientRect().width;
+      probe.remove();
+
+      return Number.isFinite(px) ? px : 0;
+    };
+
+    // Read Lumos' design-system gutter token directly. Computed custom
+    // properties can remain as clamp()/calc(), so resolve through layout.
+    const getGapPx = () => {
+      const tokenSource = boundsEl || section;
+      const siteGutter = getComputedStyle(tokenSource).getPropertyValue('--site--gutter');
+      const tokenPx = resolveCssLengthPx(siteGutter, tokenSource);
+      if (tokenPx > 0) return tokenPx;
+
+      const cs = getComputedStyle(tokenSource);
+      return resolveCssLengthPx(cs.columnGap || cs.gap, tokenSource);
+    };
+
+    const parseAspectRatio = (value) => {
+      const raw = String(value || '').trim();
+      if (!raw || raw === 'auto') return 0;
+
+      const parts = raw.split('/').map(part => parseFloat(part));
+      if (parts.length === 2 && parts[0] > 0 && parts[1] > 0) {
+        return parts[0] / parts[1];
+      }
+
+      const numeric = parseFloat(raw);
+      return numeric > 0 ? numeric : 0;
+    };
+
+    const getCellAspectRatio = () => {
+      for (const cell of cells) {
+        const media = cell.querySelector('.u-image-wrapper, .u-video, [class*="u-ratio-"], img, video');
+        const ratio = parseAspectRatio(media && getComputedStyle(media).aspectRatio);
+        if (ratio > 0) return ratio;
+      }
+      return DEFAULT_ASPECT_RATIO;
+    };
+
+    const getCellMetrics = () => {
+      const bw = getBoundsWidth();
+      const gapPx = getGapPx();
+      const ratio = getCellAspectRatio();
+      const cell1Width = (bw - gapPx) / 2;
+      const cell2Width = (bw - 3 * gapPx) / 4;
+      const cell1Height = cell1Width / ratio;
+      const cell2Height = cell2Width / ratio;
+
+      return {
+        gapPx,
+        cell1Width,
+        cell1Height,
+        cell2Width,
+        cell2Height,
+        stage1PitchX: cell1Width + gapPx,
+        stage1PitchY: cell1Height + gapPx,
+        stage2PitchX: cell2Width + gapPx,
+        stage2PitchY: cell2Height + gapPx,
+        ratio
+      };
+    };
+
+    // ─── STAGE 1 LAYOUT (2×2 grid of masters at quadrant centers) ─────────
+    const layoutInitial = () => {
+      const metrics = getCellMetrics();
+      cells.forEach((cell, i) => {
+        const col = i % COLS;
+        const row = Math.floor(i / COLS);
+        const qcol = Math.floor(col / 2);
+        const qrow = Math.floor(row / 2);
+        const master = isMaster(i);
+        const qx = (qcol - 0.5) * metrics.stage1PitchX;
+        const qy = (qrow - 0.5) * metrics.stage1PitchY;
+        gsap.set(cell, {
+          display: 'block',
+          position: 'absolute',
+          left: '50%',
+          top: '50%',
+          xPercent: -50,
+          yPercent: -50,
+          x: qx,
+          y: qy,
+          width:  `${master ? metrics.cell1Width : metrics.cell2Width}px`,
+          height: `${master ? metrics.cell1Height : metrics.cell2Height}px`,
+          scale: master ? 1 : 0.7,
+          opacity: master ? 1 : 0,
+          transformOrigin: 'center center'
+        });
+      });
+    };
+
+    // ─── BUILD ────────────────────────────────────────────────────────────
+    let tl = null;
+    const build = () => {
+      if (tl) {
+        if (tl._triggers) tl._triggers.forEach(t => t.kill());
+        if (tl._children) tl._children.forEach(c => c.kill());
+        tl = null;
+      }
+      ScrollTrigger.getAll().forEach(t => {
+        if (t.vars && t.vars.trigger === section) t.kill();
+      });
+      gsap.killTweensOf(cells);
+      if (bg) { gsap.killTweensOf(bg); bg.style.opacity = '0'; }
+      // Lock section dimensions inline — overrides any Webflow class CSS
+      // (e.g. height: auto, display: flex with flex children gone absolute).
+      gsap.set(section, {
+        y: 0,
+        position: 'relative',
+        width: '100vw',
+        height: '100vh',
+        overflow: 'hidden',
+        display: 'block'
+      });
+
+      computeEndStates();
+      layoutInitial();
+
+      const metrics = getCellMetrics();
+
+      // ─ Burst (stage 1 → 2): build the paused timeline directly, same as
+      //   the demo's triggered branch. Master shrinks + slides; non-masters
+      //   pop into their slot and fade in.
+      const QUAD_STAGGER    = 0.07;
+      const MASTER_DUR      = 0.30;
+      const NONMASTER_DUR   = 0.22;
+      const NONMASTER_DELAY = 0.18;
+      const SUB_STAGGER     = 0.06;
+
+      const burstTl = gsap.timeline({ paused: true });
+      cells.forEach((cell, i) => {
+        const col = i % COLS;
+        const row = Math.floor(i / COLS);
+        const sx  = (col - (COLS - 1) / 2) * metrics.stage2PitchX;
+        const sy  = (row - (ROWS - 1) / 2) * metrics.stage2PitchY;
+        const qcol = Math.floor(col / 2);
+        const qrow = Math.floor(row / 2);
+        const qx = (qcol - 0.5) * metrics.stage1PitchX;
+        const qy = (qrow - 0.5) * metrics.stage1PitchY;
+        const quadIdx   = qrow * 2 + qcol;
+        const quadStart = quadIdx * QUAD_STAGGER;
+
+        if (isMaster(i)) {
+          // Master: explicit fromTo so reverse always returns to stage-1 size
+          burstTl.fromTo(cell,
+            {
+              x: qx, y: qy,
+              width:  `${metrics.cell1Width}px`,
+              height: `${metrics.cell1Height}px`
+            },
+            {
+              x: sx, y: sy,
+              width:  `${metrics.cell2Width}px`,
+              height: `${metrics.cell2Height}px`,
+              duration: MASTER_DUR,
+              ease: 'power3.inOut',
+              immediateRender: false
+            }, quadStart);
+        } else {
+          const subIdx  = (row % 2) * 2 + (col % 2);
+          const startAt = quadStart + NONMASTER_DELAY + (subIdx - 1) * SUB_STAGGER;
+          // Non-master: fromTo with explicit from state (hidden at qx,qy)
+          // and explicit to state (visible at sx,sy at stage 2 size).
+          burstTl.fromTo(cell,
+            {
+              x: qx, y: qy,
+              opacity: 0,
+              scale: 0.7
+            },
+            {
+              x: sx, y: sy,
+              opacity: 1,
+              scale: 1,
+              duration: NONMASTER_DUR,
+              ease: 'power2.out',
+              immediateRender: false
+            }, startAt);
+        }
+      });
+
+      // ─ Disperse (stage 2 → stage 3): scrubbed into the main timeline
+      const animateStage2to3 = (timeline, baseTime, duration) => {
+        cells.forEach((cell, i) => {
+          const col = i % COLS;
+          const row = Math.floor(i / COLS);
+          const sx  = (col - (COLS - 1) / 2) * metrics.stage2PitchX;
+          const sy  = (row - (ROWS - 1) / 2) * metrics.stage2PitchY;
+          const e   = endStates[i];
+          timeline.fromTo(cell,
+            {
+              x: sx, y: sy,
+              width:  `${metrics.cell2Width}px`,
+              height: `${metrics.cell2Height}px`,
+              opacity: 1,
+              left: '50%', top: '50%'
+            },
+            {
+              left: `${e.x}%`,
+              top:  `${e.y}%`,
+              x: 0, y: 0,
+              width:  `${e.size}vw`,
+              height: `${e.size / metrics.ratio}vw`,
+              duration,
+              ease: EASE,
+              immediateRender: false
+            },
+            baseTime + i * STAGGER
+          );
+        });
+      };
+
+      // ─ Disperse timeline (stage 2 → 3) — paused, autonomous play
+      const disperseTl = gsap.timeline({ paused: true });
+      animateStage2to3(disperseTl, 0, TRIGGERED_DURATION * 0.7);
+      if (bg) {
+        disperseTl.fromTo(bg,
+          { opacity: 0 },
+          { opacity: 1, duration: TRIGGERED_DURATION * 0.7, ease: 'power2.inOut' },
+          0);
+      }
+
+      // Pin range divided into equal thirds: stage 1 visible | stage 2 visible | stage 3 visible
+      const totalPx         = 3000;       // 1000px per stage
+      const burstTrigger    = 1 / 3;      // burst fires at 33%
+      const disperseTrigger = 2 / 3;      // disperse fires at 67%
+      let burstFired    = false;
+      let disperseFired = false;
+
+      // Track child timelines + pin so build() can kill everything cleanly.
+      // Do NOT add burstTl/disperseTl to a parent — that would auto-play them.
+      tl = { _children: [burstTl, disperseTl], _triggers: [] };
+
+      const pinTrigger = ScrollTrigger.create({
+        trigger: section,
+        start: 'top top',
+        end:   `+=${totalPx}`,
+        pin:   true,
+        pinSpacing: 'margin',
+        pinType: 'fixed',
+        pinReparent: true,
+        anticipatePin: 1,
+        onUpdate: (self) => {
+          const p = self.progress, dir = self.direction;
+
+          // ─ Burst forward (stage 1 → 2)
+          if (!burstFired && dir === 1 && p >= burstTrigger) {
+            burstTl.play();
+            burstFired = true;
+          }
+          // ─ Burst reverse (back to stage 1)
+          else if (burstFired && dir === -1 && p < burstTrigger) {
+            // Snap disperse to its start state first — cells go to stage 2
+            // cleanly, then burst can reverse them to stage 1 without conflict.
+            if (disperseFired) {
+              disperseTl.pause(0);
+              disperseFired = false;
+            }
+            burstTl.reverse();
+            burstFired = false;
+          }
+
+          // ─ Disperse forward (stage 2 → 3)
+          if (!disperseFired && dir === 1 && p >= disperseTrigger) {
+            // Force burst to completion first — cells go to stage 2 instantly,
+            // then disperse takes over cleanly.
+            if (burstTl.progress() < 1) burstTl.pause(burstTl.duration());
+            burstFired = true;
+            disperseTl.play();
+            disperseFired = true;
+          }
+          // ─ Disperse direction flips (handle back-and-forth scrubbing)
+          if (disperseFired) {
+            if (dir === 1 && disperseTl.reversed()) {
+              disperseTl.play();
+            } else if (dir === -1 && !disperseTl.reversed() && disperseTl.progress() > 0) {
+              disperseTl.reverse();
+            }
+          }
+        },
+        onLeaveBack: () => {
+          // User scrolled above the section — reset everything to stage 1.
+          disperseTl.pause(0);
+          burstTl.pause(0);
+          burstFired    = false;
+          disperseFired = false;
+        }
+      });
+
+      tl._triggers = [pinTrigger];
+
+      ScrollTrigger.refresh();
+    };
+
+    build();
+
+    // ─── RESIZE (debounced rebuild) ───────────────────────────────────────
+    let resizeTimer = null;
+    window.addEventListener('resize', () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(build, 250);
+    });
+  });
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// END OF DISPERSE GRID
+// ════════════════════════════════════════════════════════════════════════════════
+
 // Try to start auto-scroll if DOM is already loaded (for direct page loads)
 if (document.readyState === 'complete' || document.readyState === 'interactive') {
   console.log('📄 DOM already ready, initializing standalone auto-scroll...');
@@ -2222,6 +2800,7 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
   initTextType();
   initRadialOverlay();
   initLidarScanners();
+  initDisperse();
 } else {
   document.addEventListener('DOMContentLoaded', () => {
     console.log('📄 DOM Content Loaded (standalone), initializing auto-scroll...');
@@ -2231,5 +2810,6 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
     initTextType();
     initRadialOverlay();
     initLidarScanners();
+    initDisperse();
   });
 }
