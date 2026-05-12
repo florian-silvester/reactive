@@ -2264,7 +2264,7 @@ function injectDisperseStyles() {
   style.textContent = `
     /* No !important on position — ScrollTrigger needs to flip it to fixed
        during pin, and inline pin styles must be allowed to win. */
-    [data-disperse="section"] {
+    [data-disperse="section"][data-disperse-active="true"] {
       position: relative;
       width: 100vw !important;
       height: 100vh !important;
@@ -2276,8 +2276,8 @@ function injectDisperseStyles() {
     }
     /* Use !important to override Lumos utility classes like u-display-contents
        which would otherwise neutralize absolute positioning on the cell wrapper. */
-    [data-disperse="cell"],
-    [data-disperse="cell-master"] {
+    [data-disperse="section"][data-disperse-active="true"] [data-disperse="cell"],
+    [data-disperse="section"][data-disperse-active="true"] [data-disperse="cell-master"] {
       display: block !important;
       position: absolute !important;
       left: 50%;
@@ -2288,8 +2288,8 @@ function injectDisperseStyles() {
     }
     /* Ensure media inside the cell fills the cell wrapper, so the image
        scales as the cell resizes from 15vw → 7.5vw → final size. */
-    [data-disperse="cell"] img,
-    [data-disperse="cell-master"] img {
+    [data-disperse="section"][data-disperse-active="true"] [data-disperse="cell"] img,
+    [data-disperse="section"][data-disperse-active="true"] [data-disperse="cell-master"] img {
       width: 100%;
       height: 100%;
       object-fit: cover;
@@ -2388,10 +2388,12 @@ async function initDisperse() {
     const cells = Array.from(section.querySelectorAll(
       '[data-disperse="cell"], [data-disperse="cell-master"]'
     ));
+    delete section.dataset.disperseActive;
     if (cells.length !== 16) {
       console.warn(`⚠️ DISPERSE: expected 16 cells, got ${cells.length}`, section);
       return;
     }
+    section.dataset.disperseActive = 'true';
 
     // Optional bounds element — its width sizes the 2×2 and 4×4 grids.
     // Stage 3 disperse still scatters across the full section (viewport).
@@ -2722,7 +2724,6 @@ async function initDisperse() {
         pin:   true,
         pinSpacing: 'margin',
         pinType: 'fixed',
-        pinReparent: true,
         anticipatePin: 1,
         onUpdate: (self) => {
           const p = self.progress, dir = self.direction;
