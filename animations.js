@@ -326,11 +326,6 @@ if (!window.barbaInitialized) {
             initializeMenuToggle();
           }, 600);
 
-          // Initialize Nav shrink on scroll
-          setTimeout(() => {
-            initializeNavShrinkOnScroll();
-          }, 650);
-
           // Initialize Marquee
           setTimeout(() => {
             initMarquee();
@@ -385,11 +380,6 @@ if (!window.barbaInitialized) {
     setTimeout(() => {
       initializeMenuToggle();
     }, 1100);
-
-    // Initialize Nav shrink on scroll
-    setTimeout(() => {
-      initializeNavShrinkOnScroll();
-    }, 1150);
 
     // Initialize Marquee
     setTimeout(() => {
@@ -727,23 +717,18 @@ function initializeMenuToggle() {
   if (window.menuToggleInitialized) return;
   window.menuToggleInitialized = true;
 
+  const setHamburgerOpen = (open) => {
+    document.querySelectorAll('[data-menu-trigger]').forEach((el) => {
+      el.classList.toggle('w--open', open);
+      el.querySelectorAll('.hamburger-3, [class*="hamburger"]').forEach((h) => {
+        h.classList.toggle('w--open', open);
+      });
+    });
+  };
+
   document.addEventListener('click', (event) => {
     const trigger = event.target.closest('[data-menu-trigger]');
     if (!trigger) return;
-
-    if (window.navShrinkControl) {
-      const currentMenu = document.querySelector('[data-menu]');
-      if (currentMenu && typeof window.navShrinkControl.getState === 'function') {
-        currentMenu.dataset.navRestore = window.navShrinkControl.getState();
-        console.log('🧭 [NAV] store restore state:', currentMenu.dataset.navRestore);
-      }
-      if (typeof window.navShrinkControl.setMenuOpen === 'function') {
-        window.navShrinkControl.setMenuOpen(true);
-      }
-      if (typeof window.navShrinkControl.expand === 'function') {
-        window.navShrinkControl.expand();
-      }
-    }
 
     const currentMenu = document.querySelector('[data-menu]');
     if (!currentMenu) return;
@@ -751,6 +736,7 @@ function initializeMenuToggle() {
     const isOpen = currentMenu.dataset.menuOpen === 'true';
     if (isOpen) {
       currentMenu.dataset.menuOpen = 'false';
+      setHamburgerOpen(false);
       gsap.to(currentMenu, {
         autoAlpha: 0,
         height: 0,
@@ -760,25 +746,11 @@ function initializeMenuToggle() {
         ease: 'power2.out',
         onComplete: () => {
           currentMenu.style.pointerEvents = 'none';
-          if (window.navShrinkControl) {
-            if (typeof window.navShrinkControl.setMenuOpen === 'function') {
-              window.navShrinkControl.setMenuOpen(false);
-            }
-            if (typeof window.navShrinkControl.pauseScroll === 'function') {
-              window.navShrinkControl.pauseScroll(500);
-            }
-            const restore = currentMenu.dataset.navRestore;
-            console.log('🧭 [NAV] restore state (trigger close):', restore);
-            if (restore === 'shrunk' && typeof window.navShrinkControl.shrink === 'function') {
-              window.navShrinkControl.shrink();
-            } else if (typeof window.navShrinkControl.expand === 'function') {
-              window.navShrinkControl.expand();
-            }
-          }
         },
       });
     } else {
       currentMenu.dataset.menuOpen = 'true';
+      setHamburgerOpen(true);
       currentMenu.style.pointerEvents = 'auto';
       const targetHeight = currentMenu.scrollHeight;
       const menuItemCandidates = Array.from(currentMenu.querySelectorAll('[data-menu-item]'));
@@ -796,10 +768,6 @@ function initializeMenuToggle() {
           currentMenu.style.height = 'auto';
         },
       });
-      // Ensure nav expands after menu opens (recompute width)
-      if (window.navShrinkControl && typeof window.navShrinkControl.expand === 'function') {
-        setTimeout(() => window.navShrinkControl.expand(), 80);
-      }
       if (menuItems.length > 0) {
         const tl = gsap.timeline();
         menuItems.forEach((item, index) => {
@@ -819,6 +787,7 @@ function initializeMenuToggle() {
     if (!currentMenu) return;
     if (currentMenu.dataset.menuOpen !== 'true') return;
     currentMenu.dataset.menuOpen = 'false';
+    setHamburgerOpen(false);
     gsap.to(currentMenu, {
       autoAlpha: 0,
       height: 0,
@@ -828,21 +797,6 @@ function initializeMenuToggle() {
       ease: 'power2.out',
       onComplete: () => {
         currentMenu.style.pointerEvents = 'none';
-        if (window.navShrinkControl) {
-          if (typeof window.navShrinkControl.setMenuOpen === 'function') {
-            window.navShrinkControl.setMenuOpen(false);
-          }
-          if (typeof window.navShrinkControl.pauseScroll === 'function') {
-            window.navShrinkControl.pauseScroll(500);
-          }
-          const restore = currentMenu.dataset.navRestore;
-          console.log('🧭 [NAV] restore state (closeMenu):', restore);
-          if (restore === 'shrunk' && typeof window.navShrinkControl.shrink === 'function') {
-            window.navShrinkControl.shrink();
-          } else if (typeof window.navShrinkControl.expand === 'function') {
-            window.navShrinkControl.expand();
-          }
-        }
       },
     });
   };
@@ -869,143 +823,6 @@ function initializeMenuToggle() {
       closeMenuDelayed(350);
     }
   });
-}
-
-// ================================================================================
-// 🧭 NAV SHRINK ON SCROLL (data-nav="wrap")
-// ================================================================================
-function initializeNavShrinkOnScroll() {
-  const navWraps = Array.from(document.querySelectorAll('[data-nav]'));
-  if (navWraps.length === 0) return;
-
-  const targets = navWraps.map((navWrap) => {
-    const display = window.getComputedStyle(navWrap).display;
-    const parentDisplay = navWrap.parentElement
-      ? window.getComputedStyle(navWrap.parentElement).display
-      : '';
-    // Allow explicit target for shrinking
-    const explicitTarget = navWrap.querySelector('[data-nav-target]');
-    // If display: contents or parent is flex, prefer animating inner target
-    const fallbackInner = navWrap.firstElementChild;
-    const preferInner =
-      explicitTarget ||
-      display === 'contents' ||
-      (parentDisplay && parentDisplay.includes('flex'));
-    const target = explicitTarget || (preferInner && fallbackInner) || navWrap;
-    if (!target) return null;
-    if (target.dataset.navShrinkInitialized === 'true') return null;
-    target.dataset.navShrinkInitialized = 'true';
-    gsap.set(target, {
-      width: '100%',
-      maxWidth: '100%'
-    });
-    // Only apply flex alignment on the flex item itself
-    if (target === navWrap) {
-      gsap.set(target, {
-        flexBasis: '100%',
-        marginLeft: 'auto',
-        marginRight: 0,
-        alignSelf: 'flex-end'
-      });
-    }
-    return { navWrap, target, isInner: target !== navWrap };
-  }).filter(Boolean);
-
-  let lastScrollY = window.scrollY;
-  let isShrunk = false;
-  let ticking = false;
-  let accumulatedDelta = 0;
-  let lastDir = 0;
-  const TRIGGER_DISTANCE = 40;
-
-  const animateShrink = () => {
-    isShrunk = true;
-    accumulatedDelta = 0;
-    targets.forEach(({ navWrap, target, isInner }) => {
-      target.dataset.navState = 'shrunk';
-      const parentWidth = navWrap.parentElement ? navWrap.parentElement.clientWidth : 0;
-      const targetWidth = parentWidth ? parentWidth * 0.5 : 0;
-      gsap.to(target, {
-        width: targetWidth ? `${targetWidth}px` : '50%',
-        maxWidth: targetWidth ? `${targetWidth}px` : '50%',
-        ...(isInner ? {} : { flexBasis: targetWidth ? `${targetWidth}px` : '50%' }),
-        duration: 0.25,
-        ease: 'power2.out',
-        overwrite: 'auto',
-      });
-    });
-  };
-
-  const animateExpand = () => {
-    isShrunk = false;
-    accumulatedDelta = 0;
-    targets.forEach(({ navWrap, target, isInner }) => {
-      target.dataset.navState = 'wide';
-      const parentWidth = navWrap.parentElement ? navWrap.parentElement.clientWidth : 0;
-      const currentWidth = target.getBoundingClientRect().width;
-      gsap.to(target, {
-        width: parentWidth ? `${parentWidth}px` : '100%',
-        maxWidth: parentWidth ? `${parentWidth}px` : '100%',
-        ...(isInner ? {} : { flexBasis: parentWidth ? `${parentWidth}px` : '100%' }),
-        duration: 0.45,
-        ease: 'power3.out',
-        overwrite: 'auto',
-        onStart: () => {
-          // lock current width to avoid snap before tween
-          target.style.width = `${currentWidth}px`;
-          target.style.maxWidth = `${currentWidth}px`;
-          if (!isInner) {
-            target.style.flexBasis = `${currentWidth}px`;
-          }
-        }
-      });
-    });
-  };
-
-  window.navShrinkControl = {
-    expand: animateExpand,
-    shrink: animateShrink,
-    setMenuOpen: (open) => {
-      window.navShrinkControl._menuOpen = open;
-    },
-    pauseScroll: (ms = 400) => {
-      window.navShrinkControl._ignoreScrollUntil = Date.now() + ms;
-    },
-    getState: () => (isShrunk ? 'shrunk' : 'wide')
-  };
-
-  const update = () => {
-    const currentY = window.scrollY;
-    const delta = currentY - lastScrollY;
-    lastScrollY = currentY;
-    ticking = false;
-    if (Math.abs(delta) < 4) return;
-
-    const dir = Math.sign(delta);
-    if (dir !== lastDir) {
-      accumulatedDelta = 0;
-      lastDir = dir;
-    }
-    accumulatedDelta += delta;
-
-    if (window.navShrinkControl) {
-      if (window.navShrinkControl._menuOpen) return;
-      if (window.navShrinkControl._ignoreScrollUntil && Date.now() < window.navShrinkControl._ignoreScrollUntil) return;
-    }
-
-    if (dir > 0 && !isShrunk && accumulatedDelta > TRIGGER_DISTANCE) {
-      animateShrink();
-    } else if (dir < 0 && isShrunk && accumulatedDelta < -TRIGGER_DISTANCE) {
-      animateExpand();
-    }
-  };
-
-  window.addEventListener('scroll', () => {
-    if (!ticking) {
-      ticking = true;
-      requestAnimationFrame(update);
-    }
-  }, { passive: true });
 }
 
 // ================================================================================
@@ -1604,6 +1421,8 @@ async function initLidarScanners() {
     const SCAN_RESOLUTION = 200;
     const VERTICAL_RAYS = 100;
     const MAX_RANGE = 50;
+    const BEAM_THICKNESS = 0.4; // world units; rescaled per frame for fixed pixel width
+    const TARGET_BEAM_PX = 1.5; // desired on-screen beam thickness in CSS pixels
 
     function setCamera() {
       if (viewMode === 0) {
@@ -1613,6 +1432,20 @@ async function initLidarScanners() {
         camera.position.set(0, TOP_VIEW_HEIGHT, 0.1);
         camera.lookAt(0, 0, 0);
       }
+      updateBeamPixelWidth();
+    }
+
+    function updateBeamPixelWidth() {
+      if (!scanBeam || !camera || !renderer) return;
+      const canvasHeight = renderer.domElement.clientHeight || 1;
+      // Distance from camera to scanner pivot (origin) — representative for the
+      // beam, which radiates from the origin out to MAX_RANGE.
+      const dist = camera.position.length();
+      // World units per CSS pixel at that distance, given the camera's vertical FOV.
+      const worldPerPx =
+        (2 * Math.tan((camera.fov * Math.PI) / 360) * dist) / canvasHeight;
+      const desiredWorldThickness = TARGET_BEAM_PX * worldPerPx;
+      scanBeam.scale.z = desiredWorldThickness / BEAM_THICKNESS;
     }
 
     function updateStatus(status) {
@@ -1891,18 +1724,16 @@ async function initLidarScanners() {
     }
 
     function createScanBeam() {
-      const geometry = new THREE.BufferGeometry();
-      const vertices = new Float32Array(6);
-      vertices[0] = 0; vertices[1] = 0; vertices[2] = 0;
-      vertices[3] = 0; vertices[4] = 0; vertices[5] = MAX_RANGE;
-      geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
-      const material = new THREE.LineBasicMaterial({
-        color: 0xffffff,
-        transparent: true,
-        opacity: 0.6,
-        linewidth: 2
+      const geometry = new THREE.PlaneGeometry(MAX_RANGE, BEAM_THICKNESS);
+      // Anchor one short edge at the origin; lay flat on XZ plane pointing +X at rotation.y = 0
+      geometry.translate(MAX_RANGE / 2, 0, 0);
+      geometry.rotateX(-Math.PI / 2);
+      const material = new THREE.MeshBasicMaterial({
+        color: 0xf9ffba,
+        side: THREE.DoubleSide,
+        depthWrite: false
       });
-      scanBeam = new THREE.Line(geometry, material);
+      scanBeam = new THREE.Mesh(geometry, material);
       scene.add(scanBeam);
       scanBeam.visible = false;
     }
@@ -2032,15 +1863,7 @@ async function initLidarScanners() {
           if (allowDrive) {
             vehicleZ += DRIVE_SPEED;
           }
-          const beamEnd = new THREE.Vector3(
-            Math.cos(scanAngle) * MAX_RANGE,
-            0,
-            Math.sin(scanAngle) * MAX_RANGE
-          );
-          const beamPositions = scanBeam.geometry.attributes.position.array;
-          beamPositions[3] = beamEnd.x;
-          beamPositions[5] = beamEnd.z;
-          scanBeam.geometry.attributes.position.needsUpdate = true;
+          scanBeam.rotation.y = -scanAngle;
           scanBeam.visible = true;
           appendCurrentScanSlice();
           if (scanAngle >= Math.PI * 2) {
@@ -2065,15 +1888,7 @@ async function initLidarScanners() {
           if (!isRings && morphTick % 3 === 0) {
             morphTerrainPoints();
           }
-          const beamEnd = new THREE.Vector3(
-            Math.cos(scanAngle) * MAX_RANGE,
-            0,
-            Math.sin(scanAngle) * MAX_RANGE
-          );
-          const beamPositions = scanBeam.geometry.attributes.position.array;
-          beamPositions[3] = beamEnd.x;
-          beamPositions[5] = beamEnd.z;
-          scanBeam.geometry.attributes.position.needsUpdate = true;
+          scanBeam.rotation.y = -scanAngle;
           scanBeam.visible = true;
           updateScannedPoints();
           fadePoints();
@@ -2142,6 +1957,7 @@ async function initLidarScanners() {
         renderer.setSize(width, height);
         camera.aspect = width / height;
         camera.updateProjectionMatrix();
+        updateBeamPixelWidth();
       };
       resize();
       const ro = new ResizeObserver(resize);
@@ -2152,6 +1968,7 @@ async function initLidarScanners() {
       }
       createPointCloud();
       createScanBeam();
+      updateBeamPixelWidth();
       updateStatus('READY');
       animate();
       setTimeout(startScan, 500);
@@ -2213,6 +2030,235 @@ async function initLidarScanners() {
   });
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Hero Animation — staged scroll scene (Webflow page "/hero-animation")
+//
+// Targets — matches the published DOM from the new clean rebuild:
+//   [data-scene="ground-autonomy"]   the scene wrapper (.hero_wrap)
+//   .hero_outer                       outer scroll-length container (sticky pin via CSS)
+//   [data-scene-titles]               title/subtitle overlay (fades out stage 1)
+//   .hero_grid                        the 5-cell grid
+//   .hero_cell_outer                  each of the 5 cells
+//   #hero                             the central cell — starts at viewport-cover scale
+//   .hero_cell_wrap                   image+overlay+border container (the "media")
+//   .hero_cell_label_wrap             top mono label (stays visible into stage 3)
+//   .hero_cell_title_wrap             bottom name (fades with media in stage 3)
+//   .hero_cell_pointer                the u-border-left strip (scaleY 0→1 in stage 3)
+//   .hero_map_wrap                    map background (fades in stage 3)
+// ─────────────────────────────────────────────────────────────────────────
+
+function loadScrollTriggerOnce() {
+  return new Promise((resolve, reject) => {
+    if (typeof gsap === 'undefined') { reject('GSAP not loaded'); return; }
+    if (typeof ScrollTrigger !== 'undefined') {
+      gsap.registerPlugin(ScrollTrigger);
+      resolve();
+      return;
+    }
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js';
+    s.onload = () => {
+      if (typeof ScrollTrigger !== 'undefined') {
+        gsap.registerPlugin(ScrollTrigger);
+        console.log('✅ ScrollTrigger loaded and registered');
+        resolve();
+      } else reject('ScrollTrigger missing after load');
+    };
+    s.onerror = () => reject('Failed to load ScrollTrigger');
+    document.head.appendChild(s);
+  });
+}
+
+function initHeroAnimation() {
+  const scene = document.querySelector('[data-scene="ground-autonomy"]');
+  if (!scene) return;
+
+  const hero  = document.getElementById('hero');
+  if (!hero) { console.warn('🎬 hero-animation: no #hero in document'); return; }
+
+  const outer = scene.closest('.hero_outer') || scene.parentElement;
+  if (!outer) { console.warn('🎬 hero-animation: cannot find .hero_outer scroll-length container'); return; }
+
+  loadScrollTriggerOnce().then(build).catch(err => console.error('🎬 hero-animation:', err));
+
+  let masterTl = null;
+
+  function build() {
+    if (masterTl) {
+      if (masterTl.scrollTrigger) masterTl.scrollTrigger.kill();
+      masterTl.kill();
+      gsap.set(document.querySelectorAll(
+        '.hero_cell_outer, .hero_cell_wrap, .hero_cell_label_wrap, .hero_cell_title_wrap, .hero_cell_pointer, #hero .hero_cell_wrap .u-image-wrapper, #hero .hero_cell_wrap img, [data-scene-titles], .hero_map_wrap'
+      ), { clearProps: 'all' });
+    }
+
+    const titles = document.querySelector('[data-scene-titles]');
+    const map    = document.querySelector('.hero_map_wrap');
+    const cells  = gsap.utils.toArray('.hero_cell_outer');
+    if (!cells.length) { console.warn('🎬 hero-animation: no .hero_cell_outer cells found'); return; }
+    const heroIdx = cells.indexOf(hero);
+    if (heroIdx === -1) { console.warn('🎬 hero-animation: #hero is not a .hero_cell_outer cell'); return; }
+
+    const mediaOf  = c => c.querySelector('.hero_cell_wrap');
+    const labelOf  = c => c.querySelector('.hero_cell_label_wrap');
+    const nameOf   = c => c.querySelector('.hero_cell_title_wrap');
+    const borderOf = c => c.querySelector('.hero_cell_pointer');
+    // Fading "media contents" excludes the border strip so it stays visible in stage 3.
+    const mediaContentsOf = c => Array.from(
+      c.querySelectorAll('.hero_cell_wrap > *:not(.hero_cell_pointer)')
+    );
+
+    const nonHero  = cells.filter(c => c !== hero);
+    const heroWrap = mediaOf(hero); // the image-area container of #hero — this is what covers viewport
+
+    // INITIAL STATE
+    // Non-hero cells: their image-area contents start hidden (not the wrap itself, so borders stay positioned)
+    gsap.set(nonHero.flatMap(mediaContentsOf), { opacity: 0 });
+    gsap.set(cells.map(labelOf).filter(Boolean),   { opacity: 0 });
+    gsap.set(cells.map(nameOf).filter(Boolean),    { opacity: 0 });
+    gsap.set(cells.map(borderOf).filter(Boolean),  { scaleY: 0, transformOrigin: 'top center' });
+    if (map) gsap.set(map, { opacity: 0 });
+
+    // Hero clip-path reveal: position the image-wrapper at viewport size, then
+    // animate its clip-path from inset(0) (full viewport visible) to positive
+    // insets matching the natural cell-slot. The image inside doesn't transform.
+    // CSS clip-path with NEGATIVE inset is clamped to 0, so we cannot expand a
+    // small element via clip-path — instead we expand the element itself.
+    const heroImgWrap = heroWrap ? heroWrap.querySelector('.u-image-wrapper') : null;
+    let heroFinalClip = null; // remembered for stage 1
+    let heroWrapRect  = null;
+    if (heroWrap && heroImgWrap) {
+      const r = heroWrap.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) {
+        heroWrapRect = r;
+        // Keep .hero_cell_wrap visually intact: freeze its natural size so the
+        // grid layout doesn't collapse when its child becomes absolute, and
+        // allow overflow so the expanded image-wrapper is visible.
+        gsap.set(heroWrap, {
+          overflow: 'visible',
+          width:  `${r.width}px`,
+          height: `${r.height}px`
+        });
+        // Image-wrapper: positioned absolutely at viewport origin, sized to viewport;
+        // the timeline moves a viewport-space mask and the wrapper bounds in parallel.
+        gsap.set(heroImgWrap, {
+          position: 'absolute',
+          top:    `${-r.top}px`,
+          left:   `${-r.left}px`,
+          width:  `${window.innerWidth}px`,
+          height: `${window.innerHeight}px`,
+          maxWidth: 'none',
+          maxHeight: 'none',
+          clipPath: 'inset(0px 0px 0px 0px)',
+          willChange: 'clip-path, top, left, width, height'
+        });
+        // Final clip-path (the cell-slot framed inside viewport coords):
+        heroFinalClip = `inset(${r.top}px ${window.innerWidth - r.right}px ${window.innerHeight - r.bottom}px ${r.left}px)`;
+        // Give the hero its own stacking context so its expanded image renders above sibling cells
+        gsap.set(hero, { position: 'relative', zIndex: 5 });
+      } else {
+        console.warn('🎬 hero-animation: #hero .hero_cell_wrap has zero size, clip-path init skipped');
+      }
+    } else {
+      console.warn('🎬 hero-animation: #hero is missing .hero_cell_wrap or .u-image-wrapper');
+    }
+
+    console.log('🎬 hero-animation: ready —', cells.length, 'cells, hero at index', heroIdx, '· trigger=', outer.className);
+
+    // CSS `position: sticky` on .hero_contain and .hero_map_wrap handles the visual pinning.
+    // We just scrub the timeline across the scroll-length of .hero_outer.
+    masterTl = gsap.timeline({
+      defaults: { ease: 'power2.inOut' },
+      scrollTrigger: {
+        trigger: outer,
+        start: 'top top',
+        end: 'bottom bottom',
+        scrub: 0.8,
+        invalidateOnRefresh: true,
+      }
+    });
+
+    // STAGE 1 — the mask and the expanded image-wrapper shrink in one parallel
+    // phase. The mask is authored in viewport space, then converted to the
+    // wrapper's current local clip-path so the final cell state is uncropped.
+    const heroShrinkStart = 0;
+    const heroShrinkDuration = 1.4;
+    const heroImageLag = 0.1;
+    const heroImageDuration = heroShrinkDuration - heroImageLag;
+    const heroStage2Start = heroShrinkStart + heroShrinkDuration + 0.12;
+    masterTl.addLabel('heroShrink', heroShrinkStart);
+    if (heroImgWrap && heroFinalClip) {
+      const stage1 = { mask: 0, box: 0 };
+      const lerp = (from, to, progress) => from + (to - from) * progress;
+      const renderHeroStage1 = () => {
+        const boxProgress = stage1.box;
+        const maskProgress = Math.max(stage1.mask, boxProgress);
+        const boxTop = lerp(0, heroWrapRect.top, boxProgress);
+        const boxLeft = lerp(0, heroWrapRect.left, boxProgress);
+        const boxRight = lerp(window.innerWidth, heroWrapRect.right, boxProgress);
+        const boxBottom = lerp(window.innerHeight, heroWrapRect.bottom, boxProgress);
+        const maskTop = lerp(0, heroWrapRect.top, maskProgress);
+        const maskLeft = lerp(0, heroWrapRect.left, maskProgress);
+        const maskRight = lerp(window.innerWidth, heroWrapRect.right, maskProgress);
+        const maskBottom = lerp(window.innerHeight, heroWrapRect.bottom, maskProgress);
+
+        gsap.set(heroImgWrap, {
+          top: `${boxTop - heroWrapRect.top}px`,
+          left: `${boxLeft - heroWrapRect.left}px`,
+          width: `${boxRight - boxLeft}px`,
+          height: `${boxBottom - boxTop}px`,
+          clipPath: `inset(${maskTop - boxTop}px ${boxRight - maskRight}px ${boxBottom - maskBottom}px ${maskLeft - boxLeft}px)`
+        });
+      };
+
+      masterTl.to(stage1, {
+        mask: 1,
+        duration: heroShrinkDuration,
+        ease: 'power2.inOut',
+        onUpdate: renderHeroStage1
+      }, 'heroShrink');
+      masterTl.to(stage1, {
+        box: 1,
+        duration: heroImageDuration,
+        ease: 'power2.inOut',
+        onUpdate: renderHeroStage1,
+        onComplete: renderHeroStage1
+      }, `heroShrink+=${heroImageLag}`);
+    }
+    if (titles) masterTl.to(titles, { opacity: 0, duration: 0.55, ease: 'power2.in' }, 0);
+
+    // STAGE 2 — every cell's image+overlay, label, name fade in,
+    // staggered outward from the hero (center) toward the edges
+    cells.forEach((cell, i) => {
+      const delay   = Math.abs(i - heroIdx) * 0.06;
+      const targets = [...mediaContentsOf(cell), labelOf(cell), nameOf(cell)].filter(Boolean);
+      if (targets.length) {
+        masterTl.to(targets, { opacity: 1, duration: 0.55, ease: 'power2.out' }, heroStage2Start + delay);
+      }
+    });
+
+    // STAGE 3 (2.0 → ~3.2) — image+overlay + names disappear first, then
+    // border-left strips extend top→bottom and the map fades in behind.
+    const fadingMediaContents = cells.flatMap(mediaContentsOf);
+    const allNames             = cells.map(nameOf).filter(Boolean);
+    const allBorders           = cells.map(borderOf).filter(Boolean);
+    masterTl.to([...fadingMediaContents, ...allNames], { opacity: 0, duration: 0.55, ease: 'power2.in' }, 2);
+    masterTl.to(allBorders, { scaleY: 1, duration: 0.7, ease: 'power2.out' }, 2.48);
+    if (map) {
+      masterTl.fromTo(map,
+        { opacity: 0, scale: 1.05 },
+        { opacity: 1, scale: 1, duration: 1.3, ease: 'power2.in' },
+        2.55);
+    }
+  }
+
+  let resizeTO;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTO);
+    resizeTO = setTimeout(build, 200);
+  });
+}
+
 // Try to start auto-scroll if DOM is already loaded (for direct page loads)
 if (document.readyState === 'complete' || document.readyState === 'interactive') {
   console.log('📄 DOM already ready, initializing standalone auto-scroll...');
@@ -2222,6 +2268,7 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
   initTextType();
   initRadialOverlay();
   initLidarScanners();
+  initHeroAnimation();
 } else {
   document.addEventListener('DOMContentLoaded', () => {
     console.log('📄 DOM Content Loaded (standalone), initializing auto-scroll...');
@@ -2231,5 +2278,6 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
     initTextType();
     initRadialOverlay();
     initLidarScanners();
+    initHeroAnimation();
   });
 }
