@@ -356,6 +356,11 @@ if (!window.barbaInitialized) {
             initFixedSectionSorting();
           }, 720);
 
+          // Initialize spacer-scrubbed typing text
+          setTimeout(() => {
+            initScrubTypeText();
+          }, 730);
+
           // Transition-1 exit animation after enter
           if (hasTransition1()) {
             playTransition1Out();
@@ -415,6 +420,11 @@ if (!window.barbaInitialized) {
     setTimeout(() => {
       initFixedSectionSorting();
     }, 1220);
+
+    // Initialize spacer-scrubbed typing text
+    setTimeout(() => {
+      initScrubTypeText();
+    }, 1230);
 
     // Transition-1 exit animation on initial load
     if (hasTransition1()) {
@@ -2093,6 +2103,11 @@ function injectHeroScrollGuardStyles() {
     .hero_outer:has([data-scene="ground-autonomy"]) {
       background-color: var(--swatch--dark-950);
     }
+    [data-scene="ground-autonomy"]:not([data-hero-ready="true"]) .hero_grid,
+    [data-scene="ground-autonomy"]:not([data-hero-ready="true"]) [data-scene-titles] {
+      opacity: 0;
+      visibility: hidden;
+    }
   `;
   document.head.appendChild(style);
 }
@@ -2126,6 +2141,7 @@ function initFixedSectionSorting() {
   if (window.fixedSectionSortingState) {
     const oldState = window.fixedSectionSortingState;
     oldState.triggers?.forEach((trigger) => trigger.kill());
+    oldState.parallaxTweens?.forEach((tween) => tween.kill());
     if (oldState.onScroll) window.removeEventListener('scroll', oldState.onScroll);
     if (oldState.onResize) window.removeEventListener('resize', oldState.onResize);
   }
@@ -2146,8 +2162,24 @@ function initFixedSectionSorting() {
     .map((element) => ({ element, name: getTriggerName(element) }))
     .filter((record) => sectionByName.has(record.name));
 
-  const state = { triggers: [], activeName: null, onScroll: null, onResize: null };
+  const state = {
+    triggers: [],
+    parallaxTweens: [],
+    parallaxOffsets: new Map(),
+    activeName: null,
+    onScroll: null,
+    onResize: null
+  };
   window.fixedSectionSortingState = state;
+
+  const getParallaxOffset = (panel) => state.parallaxOffsets.get(panel.name) || 0;
+
+  const setPanelParallaxOffset = (panel, y, forceApply = false) => {
+    state.parallaxOffsets.set(panel.name, y);
+    if (typeof gsap !== 'undefined' && (forceApply || state.activeName === panel.name)) {
+      gsap.set(panel.visual, { y, overwrite: false });
+    }
+  };
 
   const applyPanelState = (panel, isActive) => {
     panel.root.dataset.fixedSectionActive = isActive ? 'true' : 'false';
@@ -2156,6 +2188,7 @@ function initFixedSectionSorting() {
     const styleState = {
       autoAlpha: isActive ? 1 : 0,
       zIndex: isActive ? 1 : 0,
+      y: isActive ? getParallaxOffset(panel) : 0,
       pointerEvents: 'none',
       overwrite: true
     };
@@ -2221,6 +2254,7 @@ function initFixedSectionSorting() {
 
     if (triggerRecords.length > 0) {
       triggerRecords.forEach((record, index) => {
+        const panel = sectionByName.get(record.name);
         state.triggers.push(ScrollTrigger.create({
           trigger: record.element,
           start: 'top bottom',
@@ -2233,6 +2267,37 @@ function initFixedSectionSorting() {
             setActive(previousRecord.name);
           }
         }));
+        if (panel) {
+          const isFooter = record.name === 'footer';
+          const footerParallaxStartOffset = window.innerHeight * 0.12;
+          const parallaxScrollRatio = 0.28;
+          const easeParallaxProgress = gsap.parseEase ? gsap.parseEase('sine.inOut') : (progress) => progress;
+          const getSoftenedParallaxDistance = (self) => {
+            const scrollDistance = Math.max(0, self.scroll() - self.start);
+            const softStartDistance = Math.max(window.innerHeight, 1);
+            const softStartProgress = Math.min(scrollDistance / softStartDistance, 1);
+            return scrollDistance * parallaxScrollRatio * easeParallaxProgress(softStartProgress);
+          };
+          const getParallaxY = (self) => isFooter
+            ? footerParallaxStartOffset * (1 - easeParallaxProgress(self.progress))
+            : -getSoftenedParallaxDistance(self);
+          const updateParallaxFromTrigger = (self) => {
+            const y = self.isActive ? getParallaxY(self) : 0;
+            setPanelParallaxOffset(panel, y, self.isActive && state.activeName === panel.name);
+          };
+
+          setPanelParallaxOffset(panel, isFooter ? footerParallaxStartOffset : 0);
+          state.parallaxTweens.push(ScrollTrigger.create({
+            trigger: record.element,
+            start: isFooter ? 'top bottom' : 'bottom bottom',
+            end: isFooter ? 'top top' : 'max',
+            invalidateOnRefresh: true,
+            refreshPriority: index + 0.1,
+            onUpdate: updateParallaxFromTrigger,
+            onRefresh: updateParallaxFromTrigger,
+            onLeaveBack: () => setPanelParallaxOffset(panel, 0, true)
+          }));
+        }
       });
       setActiveByTriggerPosition();
       console.log('🧱 fixed-sections: using spacer triggers', triggerRecords.map((record) => record.name));
@@ -2258,9 +2323,183 @@ function initFixedSectionSorting() {
   });
 }
 
+function initHeroLoadText(scene) {
+  const wrappers = Array.from(scene.querySelectorAll('[data-load-text]'));
+  if (wrappers.length === 0 || typeof gsap === 'undefined') return;
+  if (scene.dataset.heroLoadTextInitialized === 'true') return;
+
+  scene.dataset.heroLoadTextInitialized = 'true';
+
+  const textItems = wrappers.map((wrapper) => {
+    const target =
+      wrapper.querySelector('h1, h2, h3, h4, h5, h6, p, [data-text-target]') || wrapper;
+    const originalText = target.dataset.loadTextOriginal || target.textContent || '';
+    target.dataset.loadTextOriginal = originalText;
+    return { wrapper, target, originalText };
+  }).filter((item) => item.originalText.trim().length > 0);
+
+  if (textItems.length === 0) return;
+
+  gsap.set(wrappers, { autoAlpha: 0 });
+  textItems.forEach(({ target }) => {
+    target.textContent = '';
+    target.style.whiteSpace = 'pre-wrap';
+  });
+
+  const tl = gsap.timeline({ delay: 0.18 });
+
+  textItems.forEach(({ wrapper, target, originalText }, index) => {
+    const startAt = index === 0 ? 0 : '>-0.05';
+    const proxy = { chars: 0 };
+    const typeDuration = Math.min(0.55, Math.max(0.24, originalText.trim().length * 0.018));
+    const steps = Math.min(28, Math.max(8, originalText.trim().length));
+
+    tl.to(wrapper, { autoAlpha: 1, duration: 0.16, ease: 'power2.out' }, startAt)
+      .to(proxy, {
+        chars: originalText.length,
+        duration: typeDuration,
+        ease: `steps(${steps})`,
+        onUpdate: () => {
+          target.textContent = originalText.slice(0, Math.round(proxy.chars));
+        },
+        onComplete: () => {
+          target.textContent = originalText;
+        }
+      }, '<0.04');
+  });
+}
+
+function initScrubTypeText() {
+  if (typeof gsap === 'undefined') return;
+
+  const wrappers = Array.from(document.querySelectorAll('[data-type-text]'));
+  if (wrappers.length === 0) return;
+
+  if (window.scrubTypeTextState) {
+    window.scrubTypeTextState.triggers?.forEach((trigger) => trigger.kill());
+    window.scrubTypeTextState.timelines?.forEach((timeline) => timeline.kill());
+    window.scrubTypeTextState.targets?.forEach(({ target, originalText }) => {
+      target.textContent = originalText;
+    });
+    window.scrubTypeTextState.overlays?.forEach((overlay) => {
+      gsap.set(overlay, { clearProps: 'opacity' });
+    });
+  }
+
+  const state = { triggers: [], timelines: [], targets: [], overlays: [] };
+  window.scrubTypeTextState = state;
+
+  const getTypeName = (element) => (element.getAttribute('data-type-text') || '').trim().toLowerCase();
+  const getTriggerName = (element) => {
+    const rawValue =
+      element.getAttribute('data-fixed-trigger') ||
+      element.getAttribute('data-section-trigger') ||
+      element.getAttribute('data-section-spacer') ||
+      element.getAttribute('data-section-scroll') ||
+      '';
+    return rawValue.trim().toLowerCase();
+  };
+  const triggerElements = Array.from(document.querySelectorAll(
+    '[data-fixed-trigger], [data-section-trigger], [data-section-spacer], [data-section-scroll]'
+  ));
+  const prefersReducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
+  loadScrollTriggerOnce().then(() => {
+    wrappers.forEach((wrapper, index) => {
+      const typeName = getTypeName(wrapper);
+      if (!typeName) return;
+
+      const target = wrapper.querySelector('h1, h2, h3, h4, h5, h6, p, [data-text-target]') || wrapper;
+      const originalText = target.dataset.scrubTypeOriginal || target.textContent || '';
+      if (originalText.trim().length === 0) return;
+
+      target.dataset.scrubTypeOriginal = originalText;
+      state.targets.push({ target, originalText });
+
+      if (prefersReducedMotion) {
+        target.textContent = originalText;
+        gsap.set(target, { opacity: 1 });
+        return;
+      }
+
+      const trigger =
+        triggerElements.find((element) => getTriggerName(element) === typeName) ||
+        document.querySelector(`[data-section="${typeName}"]`) ||
+        wrapper;
+      const section = Array.from(document.querySelectorAll('[data-section]')).find((element) => {
+        return (element.getAttribute('data-section') || '').trim().toLowerCase() === typeName;
+      });
+      const overlay = section?.querySelector('.u-overlay') || null;
+
+      target.textContent = '';
+      target.style.whiteSpace = 'pre-wrap';
+
+      const words = originalText.split(/(\s+)/).reduce((items, part) => {
+        if (part.length === 0) return items;
+        if (/^\s+$/.test(part)) {
+          target.appendChild(document.createTextNode(part));
+          return items;
+        }
+
+        const span = document.createElement('span');
+        span.textContent = part;
+        target.appendChild(span);
+        items.push(span);
+        return items;
+      }, []);
+
+      gsap.set(words, {
+        '--scrub-type-progress': '0%',
+        color: 'inherit',
+        backgroundColor: 'color-mix(in lab, currentColor 22%, transparent)',
+        backgroundImage: 'linear-gradient(90deg, currentColor, currentColor var(--scrub-type-progress), transparent var(--scrub-type-progress))',
+        backgroundClip: 'text',
+        WebkitBackgroundClip: 'text',
+        WebkitTextFillColor: 'transparent'
+      });
+
+      const tl = gsap.timeline({
+        scrollTrigger: {
+          trigger,
+          start: 'top center',
+          end: () => `+=${window.innerHeight * 1.6}`,
+          scrub: 1,
+          invalidateOnRefresh: true,
+          refreshPriority: 20 + index
+        }
+      });
+
+      words.forEach((word) => {
+        tl.to(word, {
+          '--scrub-type-progress': '100%',
+          duration: Math.max(0.08, word.textContent.length * 0.035),
+          ease: 'none'
+        });
+      });
+
+      const textRevealDuration = tl.duration();
+      if (overlay) {
+        const overlayDelay = Math.min(0.25, textRevealDuration * 0.2);
+        gsap.set(overlay, { opacity: 0 });
+        tl.to(overlay, {
+          opacity: 1,
+          duration: Math.max(0.1, textRevealDuration - overlayDelay),
+          ease: 'none'
+        }, overlayDelay);
+        state.overlays.push(overlay);
+      }
+      tl.to(words, { opacity: 0, duration: 0.6, ease: 'none' }, textRevealDuration + 0.2);
+
+      state.timelines.push(tl);
+      if (tl.scrollTrigger) state.triggers.push(tl.scrollTrigger);
+    });
+  }).catch(err => console.error('⌨️ scrub-type-text:', err));
+}
+
 function initHeroAnimation() {
   const scene = document.querySelector('[data-scene="ground-autonomy"]');
   if (!scene) return;
+  delete scene.dataset.heroReady;
 
   const hero  = document.getElementById('hero');
   if (!hero) { console.warn('🎬 hero-animation: no #hero in document'); return; }
@@ -2299,6 +2538,7 @@ function initHeroAnimation() {
     );
 
     const nonHero  = cells.filter(c => c !== hero);
+    const heroCardEntryOffset = () => Math.min(window.innerWidth * 0.14, 140);
     const heroWrap = mediaOf(hero); // the image-area container of #hero — this is what covers viewport
 
     // INITIAL STATE
@@ -2306,6 +2546,14 @@ function initHeroAnimation() {
     gsap.set(nonHero.flatMap(mediaContentsOf), { opacity: 0 });
     gsap.set(cells.map(labelOf).filter(Boolean),   { opacity: 0 });
     gsap.set(cells.map(nameOf).filter(Boolean),    { opacity: 0 });
+    nonHero.forEach((cell) => {
+      const direction = cells.indexOf(cell) < heroIdx ? -1 : 1;
+      gsap.set([...mediaContentsOf(cell), labelOf(cell), nameOf(cell)].filter(Boolean), {
+        x: () => direction * heroCardEntryOffset(),
+        scale: 1.1,
+        willChange: 'transform, opacity'
+      });
+    });
     gsap.set(cells.map(borderOf).filter(Boolean),  { scaleY: 0, transformOrigin: 'top center' });
     if (map) gsap.set(map, { opacity: 0 });
 
@@ -2348,6 +2596,8 @@ function initHeroAnimation() {
         heroFinalClip = `inset(${r.top}px ${window.innerWidth - r.right}px ${window.innerHeight - r.bottom}px ${r.left}px)`;
         // Give the hero its own stacking context so its expanded image renders above sibling cells
         gsap.set(hero, { position: 'relative', zIndex: 5 });
+        scene.dataset.heroReady = 'true';
+        initHeroLoadText(scene);
       } else {
         console.warn('🎬 hero-animation: #hero .hero_cell_wrap has zero size, clip-path init skipped');
       }
@@ -2379,7 +2629,8 @@ function initHeroAnimation() {
     const heroImageDuration = heroShrinkDuration - heroImageLag;
     const heroTitleFadeStart = heroShrinkStart + heroImageLag + heroImageDuration * 0.5;
     const heroTitleFadeDuration = 0.45;
-    const heroStage2Start = heroShrinkStart + heroShrinkDuration + 0.12;
+    const heroStage2Overlap = 0.22;
+    const heroStage2Start = heroShrinkStart + heroShrinkDuration - heroStage2Overlap;
     const heroStage2FadeDuration = 0.55;
     const heroStage2Stagger = 0.06;
     const heroStage2MaxDelay = Math.max(heroIdx, cells.length - 1 - heroIdx) * heroStage2Stagger;
@@ -2442,8 +2693,8 @@ function initHeroAnimation() {
     }
     if (titles) masterTl.to(titles, { opacity: 0, duration: heroTitleFadeDuration, ease: 'power2.in' }, heroTitleFadeStart);
 
-    // STAGE 2 — map plus every cell's image+overlay, label, name fade in,
-    // with card content staggered outward from the hero (center) toward the edges
+    // STAGE 2 — map plus every cell's image+overlay, label, name reveal,
+    // with side cards sliding inward from their side of the hero.
     if (map) {
       masterTl.to(map, {
         opacity: 1,
@@ -2455,7 +2706,14 @@ function initHeroAnimation() {
       const delay   = Math.abs(i - heroIdx) * heroStage2Stagger;
       const targets = [...mediaContentsOf(cell), labelOf(cell), nameOf(cell)].filter(Boolean);
       if (targets.length) {
-        masterTl.to(targets, { opacity: 1, duration: heroStage2FadeDuration, ease: 'power2.out' }, heroStage2Start + delay);
+        const isHeroCell = cell === hero;
+        masterTl.to(targets, {
+          opacity: 1,
+          x: isHeroCell ? undefined : 0,
+          scale: isHeroCell ? undefined : 1,
+          duration: heroStage2FadeDuration,
+          ease: isHeroCell ? 'power2.out' : 'power3.out'
+        }, heroStage2Start + delay);
       }
     });
 
@@ -2481,6 +2739,7 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
   initLidarScanners();
   initHeroAnimation();
   initFixedSectionSorting();
+  initScrubTypeText();
 } else {
   document.addEventListener('DOMContentLoaded', () => {
     console.log('📄 DOM Content Loaded (standalone), initializing auto-scroll...');
@@ -2492,5 +2751,6 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
     initLidarScanners();
     initHeroAnimation();
     initFixedSectionSorting();
+    initScrubTypeText();
   });
 }
