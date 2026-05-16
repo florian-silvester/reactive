@@ -356,9 +356,10 @@ if (!window.barbaInitialized) {
             initFixedSectionSorting();
           }, 720);
 
-          // Initialize spacer-scrubbed typing text
+          // Initialize scroll-triggered typing text
           setTimeout(() => {
             initScrubTypeText();
+            initHeaderTypeText();
           }, 730);
 
           // Transition-1 exit animation after enter
@@ -421,9 +422,10 @@ if (!window.barbaInitialized) {
       initFixedSectionSorting();
     }, 1220);
 
-    // Initialize spacer-scrubbed typing text
+    // Initialize scroll-triggered typing text
     setTimeout(() => {
       initScrubTypeText();
+      initHeaderTypeText();
     }, 1230);
 
     // Transition-1 exit animation on initial load
@@ -2496,6 +2498,139 @@ function initScrubTypeText() {
   }).catch(err => console.error('⌨️ scrub-type-text:', err));
 }
 
+function initHeaderTypeText() {
+  if (typeof gsap === 'undefined') return;
+
+  if (window.headerTypeTextState) {
+    const oldState = window.headerTypeTextState;
+    oldState.triggers?.forEach((trigger) => trigger.kill());
+    oldState.timelines?.forEach((timeline) => timeline.kill());
+    oldState.targets?.forEach(({ target, originalText, originalWhiteSpace, originalDisplay }) => {
+      target.textContent = originalText;
+      target.style.whiteSpace = originalWhiteSpace;
+      target.style.display = originalDisplay;
+      gsap.set(target, { clearProps: 'opacity,visibility' });
+    });
+    oldState.wrappers?.forEach((wrapper) => {
+      gsap.set(wrapper, { clearProps: 'opacity,visibility' });
+    });
+  }
+
+  const wrappers = Array.from(document.querySelectorAll('[data-header="type"]'));
+  const state = { triggers: [], timelines: [], targets: [], wrappers: [] };
+  window.headerTypeTextState = state;
+
+  const runId = (window.headerTypeTextRunId || 0) + 1;
+  window.headerTypeTextRunId = runId;
+
+  if (wrappers.length === 0) return;
+
+  const textTargetSelector = 'h1, h2, h3, h4, h5, h6, p, [data-text-target]';
+  const prefersReducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
+  const getTextTargets = (wrapper) => {
+    const candidates = Array.from(wrapper.querySelectorAll(textTargetSelector)).filter((target) => {
+      return (target.textContent || '').trim().length > 0;
+    });
+    const leafTargets = candidates.filter((target) => {
+      return !candidates.some((candidate) => candidate !== target && target.contains(candidate));
+    });
+
+    return leafTargets.length > 0 ? leafTargets : [wrapper];
+  };
+
+  const wrapperItems = wrappers.map((wrapper) => {
+    const targets = getTextTargets(wrapper).map((target) => {
+      const originalText = target.dataset.headerTypeOriginal || target.textContent || '';
+      target.dataset.headerTypeOriginal = originalText;
+      return {
+        target,
+        originalText,
+        originalWhiteSpace: target.style.whiteSpace,
+        originalDisplay: target.style.display,
+        typeLayer: null
+      };
+    }).filter((item) => item.originalText.trim().length > 0);
+
+    targets.forEach((item) => state.targets.push(item));
+    state.wrappers.push(wrapper);
+
+    return { wrapper, targets };
+  }).filter((item) => item.targets.length > 0);
+
+  if (wrapperItems.length === 0) return;
+
+  if (prefersReducedMotion) {
+    wrapperItems.forEach(({ wrapper, targets }) => {
+      gsap.set(wrapper, { autoAlpha: 1 });
+      targets.forEach(({ target, originalText }) => {
+        target.textContent = originalText;
+      });
+    });
+    return;
+  }
+
+  loadScrollTriggerOnce().then(() => {
+    if (window.headerTypeTextRunId !== runId) return;
+
+    wrapperItems.forEach(({ targets }, wrapperIndex) => {
+      targets.forEach((item, targetIndex) => {
+        const { target, originalText } = item;
+        const stableLayer = document.createElement('span');
+        const typeLayer = document.createElement('span');
+
+        target.textContent = '';
+        target.style.display = 'grid';
+        target.style.whiteSpace = 'pre-wrap';
+        stableLayer.textContent = originalText;
+        stableLayer.setAttribute('aria-hidden', 'true');
+        stableLayer.style.gridArea = '1 / 1';
+        stableLayer.style.visibility = 'hidden';
+        stableLayer.style.whiteSpace = 'pre-wrap';
+        typeLayer.setAttribute('aria-hidden', 'true');
+        typeLayer.style.gridArea = '1 / 1';
+        typeLayer.style.whiteSpace = 'pre-wrap';
+        typeLayer.style.pointerEvents = 'none';
+        target.appendChild(stableLayer);
+        target.appendChild(typeLayer);
+        item.typeLayer = typeLayer;
+
+        const tl = gsap.timeline({
+          scrollTrigger: {
+            trigger: target,
+            start: 'top 85%',
+            toggleActions: 'play none none none',
+            once: true,
+            invalidateOnRefresh: true,
+            refreshPriority: 30 + wrapperIndex + targetIndex * 0.01
+          }
+        });
+        const proxy = { chars: 0 };
+        const typeDuration = Math.min(0.55, Math.max(0.24, originalText.trim().length * 0.018));
+        const steps = Math.min(28, Math.max(8, originalText.trim().length));
+
+        gsap.set(typeLayer, { autoAlpha: 0 });
+        tl.to(typeLayer, { autoAlpha: 1, duration: 0.16, ease: 'power2.out' }, 0)
+          .to(proxy, {
+            chars: originalText.length,
+            duration: typeDuration,
+            ease: `steps(${steps})`,
+            onUpdate: () => {
+              typeLayer.textContent = originalText.slice(0, Math.round(proxy.chars));
+            },
+            onComplete: () => {
+              typeLayer.textContent = originalText;
+            }
+          }, '<0.04');
+        state.timelines.push(tl);
+        if (tl.scrollTrigger) state.triggers.push(tl.scrollTrigger);
+      });
+    });
+
+    ScrollTrigger.refresh();
+  }).catch(err => console.error('⌨️ header-type-text:', err));
+}
+
 function initHeroAnimation() {
   const scene = document.querySelector('[data-scene="ground-autonomy"]');
   if (!scene) return;
@@ -2740,6 +2875,7 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
   initHeroAnimation();
   initFixedSectionSorting();
   initScrubTypeText();
+  initHeaderTypeText();
 } else {
   document.addEventListener('DOMContentLoaded', () => {
     console.log('📄 DOM Content Loaded (standalone), initializing auto-scroll...');
@@ -2752,5 +2888,6 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
     initHeroAnimation();
     initFixedSectionSorting();
     initScrubTypeText();
+    initHeaderTypeText();
   });
 }
