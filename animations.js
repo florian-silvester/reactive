@@ -351,6 +351,11 @@ if (!window.barbaInitialized) {
             initLidarScanners();
           }, 700);
 
+          // Initialize fixed visual section sorting
+          setTimeout(() => {
+            initFixedSectionSorting();
+          }, 720);
+
           // Transition-1 exit animation after enter
           if (hasTransition1()) {
             playTransition1Out();
@@ -405,6 +410,11 @@ if (!window.barbaInitialized) {
     setTimeout(() => {
       initLidarScanners();
     }, 1200);
+
+    // Initialize fixed visual section sorting
+    setTimeout(() => {
+      initFixedSectionSorting();
+    }, 1220);
 
     // Transition-1 exit animation on initial load
     if (hasTransition1()) {
@@ -2041,10 +2051,10 @@ async function initLidarScanners() {
 //   .hero_cell_outer                  each of the 5 cells
 //   #hero                             the central cell — starts at viewport-cover scale
 //   .hero_cell_wrap                   image+overlay+border container (the "media")
-//   .hero_cell_label_wrap             top mono label (stays visible into stage 3)
-//   .hero_cell_title_wrap             bottom name (fades with media in stage 3)
-//   .hero_cell_pointer                the u-border-left strip (scaleY 0→1 in stage 3)
-//   .hero_map_wrap                    map background (fades in stage 3)
+//   .hero_cell_label_wrap             top mono label (reveals in stage 2)
+//   .hero_cell_title_wrap             bottom name (reveals in stage 2)
+//   .hero_cell_pointer                optional border strip (kept hidden)
+//   .hero_map_wrap                    optional map background (reveals in stage 2)
 // ─────────────────────────────────────────────────────────────────────────
 
 function loadScrollTriggerOnce() {
@@ -2069,6 +2079,185 @@ function loadScrollTriggerOnce() {
   });
 }
 
+function injectHeroScrollGuardStyles() {
+  if (document.getElementById('hero-scroll-guard-styles')) return;
+  const style = document.createElement('style');
+  style.id = 'hero-scroll-guard-styles';
+  style.textContent = `
+    html:has([data-scene="ground-autonomy"]),
+    body:has([data-scene="ground-autonomy"]) {
+      overscroll-behavior-y: none;
+      background-color: var(--swatch--dark-950);
+    }
+    [data-scene="ground-autonomy"],
+    .hero_outer:has([data-scene="ground-autonomy"]) {
+      background-color: var(--swatch--dark-950);
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+function initFixedSectionSorting() {
+  const allowedSections = ['hero', 'quote', 'footer'];
+  const allowedSectionSet = new Set(allowedSections);
+  const fixedSections = [];
+  const sectionByName = new Map();
+
+  Array.from(document.querySelectorAll('[data-section]')).forEach((root) => {
+    const name = (root.getAttribute('data-section') || '').trim().toLowerCase();
+    if (!allowedSectionSet.has(name) || sectionByName.has(name)) return;
+
+    const rootStyles = window.getComputedStyle(root);
+    const visual = rootStyles.display === 'contents'
+      ? (root.firstElementChild || root)
+      : root;
+    const section = { name, root, visual };
+    fixedSections.push(section);
+    sectionByName.set(name, section);
+  });
+
+  fixedSections.sort((a, b) => allowedSections.indexOf(a.name) - allowedSections.indexOf(b.name));
+
+  if (fixedSections.length < 2) return;
+
+  const runId = (window.fixedSectionSortingRunId || 0) + 1;
+  window.fixedSectionSortingRunId = runId;
+
+  if (window.fixedSectionSortingState) {
+    const oldState = window.fixedSectionSortingState;
+    oldState.triggers?.forEach((trigger) => trigger.kill());
+    if (oldState.onScroll) window.removeEventListener('scroll', oldState.onScroll);
+    if (oldState.onResize) window.removeEventListener('resize', oldState.onResize);
+  }
+
+  const getTriggerName = (element) => {
+    const rawValue =
+      element.getAttribute('data-fixed-trigger') ||
+      element.getAttribute('data-section-trigger') ||
+      element.getAttribute('data-section-spacer') ||
+      element.getAttribute('data-section-scroll') ||
+      '';
+    return rawValue.trim().toLowerCase();
+  };
+
+  const triggerRecords = Array.from(document.querySelectorAll(
+    '[data-fixed-trigger], [data-section-trigger], [data-section-spacer], [data-section-scroll]'
+  ))
+    .map((element) => ({ element, name: getTriggerName(element) }))
+    .filter((record) => sectionByName.has(record.name));
+
+  const state = { triggers: [], activeName: null, onScroll: null, onResize: null };
+  window.fixedSectionSortingState = state;
+
+  const applyPanelState = (panel, isActive) => {
+    panel.root.dataset.fixedSectionActive = isActive ? 'true' : 'false';
+    panel.root.setAttribute('aria-hidden', isActive ? 'false' : 'true');
+
+    const styleState = {
+      autoAlpha: isActive ? 1 : 0,
+      zIndex: isActive ? 1 : 0,
+      pointerEvents: 'none',
+      overwrite: true
+    };
+
+    if (typeof gsap !== 'undefined') {
+      gsap.set(panel.visual, styleState);
+    } else {
+      panel.visual.style.opacity = isActive ? '1' : '0';
+      panel.visual.style.visibility = isActive ? 'visible' : 'hidden';
+      panel.visual.style.zIndex = String(isActive ? 1 : 0);
+      panel.visual.style.pointerEvents = 'none';
+    }
+  };
+
+  const setActive = (activeName) => {
+    if (state.activeName === activeName) return;
+    state.activeName = activeName;
+
+    fixedSections.forEach((panel) => {
+      applyPanelState(panel, panel.name === activeName);
+    });
+  };
+
+  const setActiveByViewportProgress = () => {
+    const range = Math.max(window.innerHeight, 1);
+    const index = Math.max(0, Math.min(fixedSections.length - 1, Math.floor(window.scrollY / range)));
+    setActive(fixedSections[index].name);
+  };
+
+  const setActiveByTriggerPosition = () => {
+    if (triggerRecords.length === 0) {
+      setActiveByViewportProgress();
+      return;
+    }
+
+    const viewportActivationLine = window.innerHeight;
+    const activeRecord = triggerRecords.reduce((current, record) => {
+      const rect = record.element.getBoundingClientRect();
+      if (rect.top <= viewportActivationLine) return record;
+      return current;
+    }, triggerRecords[0]);
+    setActive(activeRecord.name);
+  };
+
+  const buildNativeFallback = () => {
+    state.onScroll = setActiveByViewportProgress;
+    state.onResize = setActiveByViewportProgress;
+    window.addEventListener('scroll', state.onScroll, { passive: true });
+    window.addEventListener('resize', state.onResize);
+    setActiveByViewportProgress();
+    console.warn('🧱 fixed-sections: no matching spacer triggers found; using viewport fallback', fixedSections.map((panel) => panel.name));
+  };
+
+  setActiveByTriggerPosition();
+
+  if (typeof gsap === 'undefined') {
+    buildNativeFallback();
+    return;
+  }
+
+  loadScrollTriggerOnce().then(() => {
+    if (window.fixedSectionSortingRunId !== runId) return;
+
+    if (triggerRecords.length > 0) {
+      triggerRecords.forEach((record, index) => {
+        state.triggers.push(ScrollTrigger.create({
+          trigger: record.element,
+          start: 'top bottom',
+          end: 'bottom bottom',
+          refreshPriority: index,
+          onEnter: () => setActive(record.name),
+          onEnterBack: () => setActive(record.name),
+          onLeaveBack: () => {
+            const previousRecord = triggerRecords[Math.max(0, index - 1)];
+            setActive(previousRecord.name);
+          }
+        }));
+      });
+      setActiveByTriggerPosition();
+      console.log('🧱 fixed-sections: using spacer triggers', triggerRecords.map((record) => record.name));
+    } else {
+      state.triggers.push(ScrollTrigger.create({
+        id: 'fixed-section-sorting',
+        start: 0,
+        end: () => Math.max(window.innerHeight * fixedSections.length, 1),
+        invalidateOnRefresh: true,
+        onUpdate: setActiveByViewportProgress,
+        onRefresh: setActiveByViewportProgress,
+        onLeave: () => setActive(fixedSections[fixedSections.length - 1].name),
+        onLeaveBack: () => setActive(fixedSections[0].name)
+      }));
+      setActiveByViewportProgress();
+      console.warn('🧱 fixed-sections: no matching spacer triggers found; using viewport fallback', fixedSections.map((panel) => panel.name));
+    }
+
+    ScrollTrigger.refresh();
+  }).catch((err) => {
+    console.warn('🧱 fixed-sections: ScrollTrigger unavailable, using native fallback', err);
+    buildNativeFallback();
+  });
+}
+
 function initHeroAnimation() {
   const scene = document.querySelector('[data-scene="ground-autonomy"]');
   if (!scene) return;
@@ -2079,6 +2268,7 @@ function initHeroAnimation() {
   const outer = scene.closest('.hero_outer') || scene.parentElement;
   if (!outer) { console.warn('🎬 hero-animation: cannot find .hero_outer scroll-length container'); return; }
 
+  injectHeroScrollGuardStyles();
   loadScrollTriggerOnce().then(build).catch(err => console.error('🎬 hero-animation:', err));
 
   let masterTl = null;
@@ -2103,7 +2293,7 @@ function initHeroAnimation() {
     const labelOf  = c => c.querySelector('.hero_cell_label_wrap');
     const nameOf   = c => c.querySelector('.hero_cell_title_wrap');
     const borderOf = c => c.querySelector('.hero_cell_pointer');
-    // Fading "media contents" excludes the border strip so it stays visible in stage 3.
+    // Media contents excludes the optional border strip so Stage 2 only reveals card media.
     const mediaContentsOf = c => Array.from(
       c.querySelectorAll('.hero_cell_wrap > *:not(.hero_cell_pointer)')
     );
@@ -2139,12 +2329,14 @@ function initHeroAnimation() {
           width:  `${r.width}px`,
           height: `${r.height}px`
         });
-        // Image-wrapper: positioned absolutely at viewport origin, sized to viewport;
-        // the timeline moves a viewport-space mask and the wrapper bounds in parallel.
+        // Image-wrapper: fixed during stage 1 so Chrome's root scroll/paint never
+        // exposes page background above the fullscreen frame.
         gsap.set(heroImgWrap, {
-          position: 'absolute',
-          top:    `${-r.top}px`,
-          left:   `${-r.left}px`,
+          position: 'fixed',
+          top:    '0px',
+          left:   '0px',
+          right:  'auto',
+          bottom: 'auto',
           width:  `${window.innerWidth}px`,
           height: `${window.innerHeight}px`,
           maxWidth: 'none',
@@ -2173,7 +2365,7 @@ function initHeroAnimation() {
         trigger: outer,
         start: 'top top',
         end: 'bottom bottom',
-        scrub: 0.8,
+        scrub: true,
         invalidateOnRefresh: true,
       }
     });
@@ -2185,7 +2377,14 @@ function initHeroAnimation() {
     const heroShrinkDuration = 1.4;
     const heroImageLag = 0.1;
     const heroImageDuration = heroShrinkDuration - heroImageLag;
+    const heroTitleFadeStart = heroShrinkStart + heroImageLag + heroImageDuration * 0.5;
+    const heroTitleFadeDuration = 0.45;
     const heroStage2Start = heroShrinkStart + heroShrinkDuration + 0.12;
+    const heroStage2FadeDuration = 0.55;
+    const heroStage2Stagger = 0.06;
+    const heroStage2MaxDelay = Math.max(heroIdx, cells.length - 1 - heroIdx) * heroStage2Stagger;
+    const heroGridHoldDuration = 0.35;
+    const heroGridHoldStart = heroStage2Start + heroStage2MaxDelay + heroStage2FadeDuration;
     masterTl.addLabel('heroShrink', heroShrinkStart);
     if (heroImgWrap && heroFinalClip) {
       const stage1 = { mask: 0, box: 0 };
@@ -2202,13 +2401,29 @@ function initHeroAnimation() {
         const maskRight = lerp(window.innerWidth, heroWrapRect.right, maskProgress);
         const maskBottom = lerp(window.innerHeight, heroWrapRect.bottom, maskProgress);
 
-        gsap.set(heroImgWrap, {
-          top: `${boxTop - heroWrapRect.top}px`,
-          left: `${boxLeft - heroWrapRect.left}px`,
-          width: `${boxRight - boxLeft}px`,
-          height: `${boxBottom - boxTop}px`,
-          clipPath: `inset(${maskTop - boxTop}px ${boxRight - maskRight}px ${boxBottom - maskBottom}px ${maskLeft - boxLeft}px)`
-        });
+        if (boxProgress >= 0.999 && maskProgress >= 0.999) {
+          gsap.set(heroImgWrap, {
+            position: 'absolute',
+            top: '0px',
+            left: '0px',
+            right: 'auto',
+            bottom: 'auto',
+            width: `${heroWrapRect.width}px`,
+            height: `${heroWrapRect.height}px`,
+            clipPath: 'inset(0px 0px 0px 0px)'
+          });
+        } else {
+          gsap.set(heroImgWrap, {
+            position: 'fixed',
+            top: `${boxTop}px`,
+            left: `${boxLeft}px`,
+            right: 'auto',
+            bottom: 'auto',
+            width: `${boxRight - boxLeft}px`,
+            height: `${boxBottom - boxTop}px`,
+            clipPath: `inset(${maskTop - boxTop}px ${boxRight - maskRight}px ${boxBottom - maskBottom}px ${maskLeft - boxLeft}px)`
+          });
+        }
       };
 
       masterTl.to(stage1, {
@@ -2225,31 +2440,27 @@ function initHeroAnimation() {
         onComplete: renderHeroStage1
       }, `heroShrink+=${heroImageLag}`);
     }
-    if (titles) masterTl.to(titles, { opacity: 0, duration: 0.55, ease: 'power2.in' }, 0);
+    if (titles) masterTl.to(titles, { opacity: 0, duration: heroTitleFadeDuration, ease: 'power2.in' }, heroTitleFadeStart);
 
-    // STAGE 2 — every cell's image+overlay, label, name fade in,
-    // staggered outward from the hero (center) toward the edges
+    // STAGE 2 — map plus every cell's image+overlay, label, name fade in,
+    // with card content staggered outward from the hero (center) toward the edges
+    if (map) {
+      masterTl.to(map, {
+        opacity: 1,
+        duration: heroStage2FadeDuration + heroStage2MaxDelay,
+        ease: 'power2.out'
+      }, heroStage2Start);
+    }
     cells.forEach((cell, i) => {
-      const delay   = Math.abs(i - heroIdx) * 0.06;
+      const delay   = Math.abs(i - heroIdx) * heroStage2Stagger;
       const targets = [...mediaContentsOf(cell), labelOf(cell), nameOf(cell)].filter(Boolean);
       if (targets.length) {
-        masterTl.to(targets, { opacity: 1, duration: 0.55, ease: 'power2.out' }, heroStage2Start + delay);
+        masterTl.to(targets, { opacity: 1, duration: heroStage2FadeDuration, ease: 'power2.out' }, heroStage2Start + delay);
       }
     });
 
-    // STAGE 3 (2.0 → ~3.2) — image+overlay + names disappear first, then
-    // border-left strips extend top→bottom and the map fades in behind.
-    const fadingMediaContents = cells.flatMap(mediaContentsOf);
-    const allNames             = cells.map(nameOf).filter(Boolean);
-    const allBorders           = cells.map(borderOf).filter(Boolean);
-    masterTl.to([...fadingMediaContents, ...allNames], { opacity: 0, duration: 0.55, ease: 'power2.in' }, 2);
-    masterTl.to(allBorders, { scaleY: 1, duration: 0.7, ease: 'power2.out' }, 2.48);
-    if (map) {
-      masterTl.fromTo(map,
-        { opacity: 0, scale: 1.05 },
-        { opacity: 1, scale: 1, duration: 1.3, ease: 'power2.in' },
-        2.55);
-    }
+    // Briefly hold the fully revealed grid; no map or line takeover stage.
+    masterTl.to({}, { duration: heroGridHoldDuration }, heroGridHoldStart);
   }
 
   let resizeTO;
@@ -2269,6 +2480,7 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
   initRadialOverlay();
   initLidarScanners();
   initHeroAnimation();
+  initFixedSectionSorting();
 } else {
   document.addEventListener('DOMContentLoaded', () => {
     console.log('📄 DOM Content Loaded (standalone), initializing auto-scroll...');
@@ -2279,5 +2491,6 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
     initRadialOverlay();
     initLidarScanners();
     initHeroAnimation();
+    initFixedSectionSorting();
   });
 }
