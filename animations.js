@@ -2554,7 +2554,11 @@ function initHeaderTypeText() {
 
   const wrapperItems = wrappers.map((wrapper) => {
     const targets = getTextTargets(wrapper).map((target) => {
-      const originalText = target.dataset.headerTypeOriginal || target.textContent || '';
+      target.querySelectorAll('[data-header-type-layer]').forEach((layer) => layer.remove());
+      if ((target.textContent || '').trim().length === 0 && target.dataset.headerTypeOriginal) {
+        target.textContent = target.dataset.headerTypeOriginal;
+      }
+      const originalText = target.textContent || '';
       target.dataset.headerTypeOriginal = originalText;
       return {
         target,
@@ -2596,10 +2600,12 @@ function initHeaderTypeText() {
         target.style.display = 'grid';
         target.style.whiteSpace = 'pre-wrap';
         stableLayer.textContent = originalText;
+        stableLayer.dataset.headerTypeLayer = 'stable';
         stableLayer.setAttribute('aria-hidden', 'true');
         stableLayer.style.gridArea = '1 / 1';
         stableLayer.style.visibility = 'hidden';
         stableLayer.style.whiteSpace = 'pre-wrap';
+        typeLayer.dataset.headerTypeLayer = 'typed';
         typeLayer.setAttribute('aria-hidden', 'true');
         typeLayer.style.gridArea = '1 / 1';
         typeLayer.style.whiteSpace = 'pre-wrap';
@@ -2635,6 +2641,11 @@ function initHeaderTypeText() {
               typeLayer.textContent = originalText;
             }
           }, '<0.04');
+        requestAnimationFrame(() => {
+          const rect = target.getBoundingClientRect();
+          const hasReachedTrigger = rect.top <= window.innerHeight * 0.85;
+          if (hasReachedTrigger && tl.progress() === 0) tl.play();
+        });
         state.timelines.push(tl);
         if (tl.scrollTrigger) state.triggers.push(tl.scrollTrigger);
       });
@@ -2684,6 +2695,7 @@ function initHeroAnimation() {
     const mediaContentsOf = c => Array.from(
       c.querySelectorAll('.hero_cell_wrap > *:not(.hero_cell_pointer)')
     );
+    const textTargetOf = wrapper => wrapper?.querySelector('h1, h2, h3, h4, h5, h6, p, [data-text-target]') || wrapper;
 
     const nonHero  = cells.filter(c => c !== hero);
     const heroCardEntryOffset = () => Math.min(window.innerWidth * 0.14, 140);
@@ -2692,11 +2704,11 @@ function initHeroAnimation() {
     // INITIAL STATE
     // Non-hero cells: their image-area contents start hidden (not the wrap itself, so borders stay positioned)
     gsap.set(nonHero.flatMap(mediaContentsOf), { opacity: 0 });
-    gsap.set(cells.map(labelOf).filter(Boolean),   { opacity: 0 });
-    gsap.set(cells.map(nameOf).filter(Boolean),    { opacity: 0 });
+    gsap.set(cells.map(labelOf).filter(Boolean),   { opacity: 0, x: 0, scale: 1, willChange: 'opacity' });
+    gsap.set(cells.map(nameOf).filter(Boolean),    { opacity: 0, x: 0, scale: 1, willChange: 'opacity' });
     nonHero.forEach((cell) => {
       const direction = cells.indexOf(cell) < heroIdx ? -1 : 1;
-      gsap.set([...mediaContentsOf(cell), labelOf(cell), nameOf(cell)].filter(Boolean), {
+      gsap.set(mediaContentsOf(cell).filter(Boolean), {
         x: () => direction * heroCardEntryOffset(),
         scale: 1.1,
         willChange: 'transform, opacity'
@@ -2785,13 +2797,20 @@ function initHeroAnimation() {
     const heroImageDuration = heroShrinkDuration - heroImageLag;
     const heroTitleFadeStart = heroShrinkStart + heroImageLag + heroImageDuration * 0.5;
     const heroTitleFadeDuration = 0.45;
-    const heroStage2Overlap = 0.22;
+    const heroStage2Overlap = 0.3;
     const heroStage2Start = heroShrinkStart + heroShrinkDuration - heroStage2Overlap;
     const heroStage2FadeDuration = 0.55;
-    const heroStage2Stagger = 0.06;
+    const heroStage2Stagger = 0.08;
     const heroStage2MaxDelay = Math.max(heroIdx, cells.length - 1 - heroIdx) * heroStage2Stagger;
     const heroGridHoldDuration = 0.35;
     const heroGridHoldStart = heroStage2Start + heroStage2MaxDelay + heroStage2FadeDuration;
+    const heroCardDriftDuration = 0.9;
+    const heroCardDriftMultipliers = [-0.16, -0.28, -0.1, -0.22, -0.34];
+    const heroCardExitScales = [0.62, 0.48, 0.68, 0.54, 0.5];
+    const heroCardTypeStart = heroGridHoldStart - 0.12;
+    const heroCardTypeStagger = 0.1;
+    const heroCardTypeDuration = 0.45;
+    const heroCardTextHoldDuration = 0.35;
     masterTl.addLabel('heroShrink', heroShrinkStart);
     if (heroImgWrap && heroFinalClip) {
       const lerp = (from, to, progress) => from + (to - from) * progress;
@@ -2820,7 +2839,10 @@ function initHeroAnimation() {
         const isFullscreenRange = boxProgress < 0.999 || maskProgress < 0.999;
         window.heroFullscreenParallaxLock = isFullscreenRange;
 
-        if (isFullscreenRange) resetHeroPanelParallax();
+        if (isFullscreenRange) {
+          resetHeroPanelParallax();
+          gsap.set(cells, { clearProps: 'transform' });
+        }
 
         if (boxProgress <= 0.001 && maskProgress <= 0.001) {
           gsap.set(heroImgWrap, {
@@ -2875,7 +2897,61 @@ function initHeroAnimation() {
     }
     if (titles) masterTl.to(titles, { opacity: 0, duration: heroTitleFadeDuration, ease: 'power2.in' }, heroTitleFadeStart);
 
-    // STAGE 2 — map plus every cell's image+overlay, label, name reveal,
+    const createHeroCardTypeItem = (wrapper) => {
+      if (!wrapper) return null;
+
+      const target = textTargetOf(wrapper);
+      target.querySelectorAll('[data-hero-card-type-layer]').forEach((layer) => layer.remove());
+      if ((target.textContent || '').trim().length === 0 && target.dataset.heroCardTypeOriginal) {
+        target.textContent = target.dataset.heroCardTypeOriginal;
+      }
+      const originalText = target.textContent || '';
+      if (originalText.trim().length === 0) return null;
+
+      target.dataset.heroCardTypeOriginal = originalText;
+      target.textContent = '';
+      target.style.display = 'grid';
+      target.style.whiteSpace = 'pre-wrap';
+
+      const stableLayer = document.createElement('span');
+      const typeLayer = document.createElement('span');
+      stableLayer.textContent = originalText;
+      stableLayer.dataset.heroCardTypeLayer = 'stable';
+      stableLayer.setAttribute('aria-hidden', 'true');
+      stableLayer.style.gridArea = '1 / 1';
+      stableLayer.style.visibility = 'hidden';
+      stableLayer.style.whiteSpace = 'pre-wrap';
+      typeLayer.dataset.heroCardTypeLayer = 'typed';
+      typeLayer.textContent = originalText;
+      typeLayer.setAttribute('aria-hidden', 'true');
+      typeLayer.style.gridArea = '1 / 1';
+      typeLayer.style.whiteSpace = 'pre-wrap';
+      typeLayer.style.pointerEvents = 'none';
+      typeLayer.style.display = 'inline-block';
+      typeLayer.style.width = 'max-content';
+      typeLayer.style.maxWidth = '100%';
+      typeLayer.style.justifySelf = window.getComputedStyle(target).textAlign === 'right'
+        ? 'end'
+        : window.getComputedStyle(target).textAlign === 'center'
+          ? 'center'
+          : 'start';
+      typeLayer.style.clipPath = 'inset(0 100% 0 0)';
+      target.appendChild(stableLayer);
+      target.appendChild(typeLayer);
+
+      return { wrapper, originalText, typeLayer };
+    };
+    const heroCardTypeItems = cells.flatMap((cell) => {
+      return [labelOf(cell), nameOf(cell)]
+        .map(createHeroCardTypeItem)
+        .filter(Boolean);
+    });
+    const heroCardDriftStart = heroCardTypeStart
+      + heroCardTypeDuration
+      + Math.max(0, heroCardTypeItems.length - 1) * heroCardTypeStagger
+      + heroCardTextHoldDuration;
+
+    // STAGE 2 — map plus every cell's image+overlay reveal,
     // with side cards sliding inward from their side of the hero.
     if (map) {
       masterTl.to(map, {
@@ -2886,7 +2962,7 @@ function initHeroAnimation() {
     }
     cells.forEach((cell, i) => {
       const delay   = Math.abs(i - heroIdx) * heroStage2Stagger;
-      const targets = [...mediaContentsOf(cell), labelOf(cell), nameOf(cell)].filter(Boolean);
+      const targets = mediaContentsOf(cell).filter(Boolean);
       if (targets.length) {
         const isHeroCell = cell === hero;
         masterTl.to(targets, {
@@ -2899,8 +2975,50 @@ function initHeroAnimation() {
       }
     });
 
+    heroCardTypeItems.forEach(({ wrapper, originalText, typeLayer }, index) => {
+      const typeDuration = Math.min(0.45, Math.max(0.2, originalText.trim().length * 0.016));
+      const steps = Math.min(24, Math.max(8, originalText.trim().length));
+      const startAt = heroCardTypeStart + index * heroCardTypeStagger;
+
+      masterTl.to(wrapper, { opacity: 1, duration: 0.08, ease: 'none' }, startAt)
+        .to(typeLayer, {
+          clipPath: 'inset(0 0% 0 0)',
+          duration: typeDuration,
+          ease: `steps(${steps})`
+        }, startAt);
+    });
+    const heroCardTextWrappers = heroCardTypeItems.map(({ wrapper }) => wrapper).filter(Boolean);
+    if (heroCardTextWrappers.length) {
+      masterTl.to(heroCardTextWrappers, {
+        opacity: 0,
+        duration: 0.35,
+        ease: 'power1.out'
+      }, heroCardDriftStart);
+    }
+
     // Briefly hold the fully revealed grid; no map or line takeover stage.
     masterTl.to({}, { duration: heroGridHoldDuration }, heroGridHoldStart);
+    cells.forEach((cell, i) => {
+      if (cell === hero) return;
+      const normalizedIndex = i - heroIdx;
+      const fallbackMultiplier = -0.12 - Math.abs(normalizedIndex) * 0.08;
+      const multiplier = heroCardDriftMultipliers[i] ?? fallbackMultiplier;
+      const cardWrap = mediaOf(cell);
+      const targetScale = heroCardExitScales[i] ?? 0.58;
+      masterTl.to(cell, {
+        y: () => window.innerHeight * multiplier,
+        duration: heroCardDriftDuration,
+        ease: 'none'
+      }, heroCardDriftStart);
+      if (cardWrap) {
+        masterTl.to(cardWrap, {
+          scale: targetScale,
+          transformOrigin: 'left bottom',
+          duration: heroCardDriftDuration,
+          ease: 'none'
+        }, heroCardDriftStart);
+      }
+    });
   }
 
   let resizeTO;
