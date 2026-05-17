@@ -2175,11 +2175,19 @@ function initFixedSectionSorting() {
   window.fixedSectionSortingState = state;
 
   const getParallaxOffset = (panel) => state.parallaxOffsets.get(panel.name) || 0;
+  const isHeroParallaxLocked = (panel) => {
+    return panel.name === 'hero' && window.heroFullscreenParallaxLock === true;
+  };
 
   const setPanelParallaxOffset = (panel, y, forceApply = false) => {
-    state.parallaxOffsets.set(panel.name, y);
+    const nextY = isHeroParallaxLocked(panel) ? 0 : y;
+    state.parallaxOffsets.set(panel.name, nextY);
     if (typeof gsap !== 'undefined' && (forceApply || state.activeName === panel.name)) {
-      gsap.set(panel.visual, { y, overwrite: false });
+      if (isHeroParallaxLocked(panel)) {
+        gsap.set(panel.visual, { clearProps: 'transform' });
+      } else {
+        gsap.set(panel.visual, { y: nextY, overwrite: false });
+      }
     }
   };
 
@@ -2197,6 +2205,9 @@ function initFixedSectionSorting() {
 
     if (typeof gsap !== 'undefined') {
       gsap.set(panel.visual, styleState);
+      if (isActive && isHeroParallaxLocked(panel)) {
+        gsap.set(panel.visual, { clearProps: 'transform' });
+      }
     } else {
       panel.visual.style.opacity = isActive ? '1' : '0';
       panel.visual.style.visibility = isActive ? 'visible' : 'hidden';
@@ -2284,7 +2295,8 @@ function initFixedSectionSorting() {
             ? footerParallaxStartOffset * (1 - easeParallaxProgress(self.progress))
             : -getSoftenedParallaxDistance(self);
           const updateParallaxFromTrigger = (self) => {
-            const y = self.isActive ? getParallaxY(self) : 0;
+            const heroParallaxLocked = panel.name === 'hero' && window.heroFullscreenParallaxLock === true;
+            const y = self.isActive && !heroParallaxLocked ? getParallaxY(self) : 0;
             setPanelParallaxOffset(panel, y, self.isActive && state.activeName === panel.name);
           };
 
@@ -2292,11 +2304,12 @@ function initFixedSectionSorting() {
           state.parallaxTweens.push(ScrollTrigger.create({
             trigger: record.element,
             start: isFooter ? 'top bottom' : 'bottom bottom',
-            end: isFooter ? 'top top' : 'max',
+            end: isFooter ? 'top top' : 'bottom top',
             invalidateOnRefresh: true,
             refreshPriority: index + 0.1,
             onUpdate: updateParallaxFromTrigger,
             onRefresh: updateParallaxFromTrigger,
+            onLeave: () => setPanelParallaxOffset(panel, 0, true),
             onLeaveBack: () => setPanelParallaxOffset(panel, 0, true)
           }));
         }
@@ -2627,7 +2640,6 @@ function initHeaderTypeText() {
       });
     });
 
-    ScrollTrigger.refresh();
   }).catch(err => console.error('⌨️ header-type-text:', err));
 }
 
@@ -2635,6 +2647,7 @@ function initHeroAnimation() {
   const scene = document.querySelector('[data-scene="ground-autonomy"]');
   if (!scene) return;
   delete scene.dataset.heroReady;
+  window.heroFullscreenParallaxLock = false;
 
   const hero  = document.getElementById('hero');
   if (!hero) { console.warn('🎬 hero-animation: no #hero in document'); return; }
@@ -2742,16 +2755,24 @@ function initHeroAnimation() {
 
     console.log('🎬 hero-animation: ready —', cells.length, 'cells, hero at index', heroIdx, '· trigger=', outer.className);
 
+    let renderHeroStage1 = null;
+
     // CSS `position: sticky` on .hero_contain and .hero_map_wrap handles the visual pinning.
     // We just scrub the timeline across the scroll-length of .hero_outer.
     masterTl = gsap.timeline({
       defaults: { ease: 'power2.inOut' },
+      onUpdate: () => {
+        if (renderHeroStage1) renderHeroStage1();
+      },
       scrollTrigger: {
         trigger: outer,
         start: 'top top',
         end: 'bottom bottom',
         scrub: true,
         invalidateOnRefresh: true,
+        onUpdate: () => {
+          if (renderHeroStage1) renderHeroStage1();
+        }
       }
     });
 
@@ -2773,11 +2794,48 @@ function initHeroAnimation() {
     const heroGridHoldStart = heroStage2Start + heroStage2MaxDelay + heroStage2FadeDuration;
     masterTl.addLabel('heroShrink', heroShrinkStart);
     if (heroImgWrap && heroFinalClip) {
-      const stage1 = { mask: 0, box: 0 };
       const lerp = (from, to, progress) => from + (to - from) * progress;
-      const renderHeroStage1 = () => {
-        const boxProgress = stage1.box;
-        const maskProgress = Math.max(stage1.mask, boxProgress);
+      const clampProgress = gsap.utils.clamp(0, 1);
+      const easeStageProgress = gsap.parseEase ? gsap.parseEase('power2.inOut') : (progress) => progress;
+      const getStageProgress = (start, duration) => {
+        return easeStageProgress(clampProgress((masterTl.time() - start) / duration));
+      };
+      const resetHeroPanelParallax = () => {
+        const heroPanelRoot = document.querySelector('[data-section="hero"]');
+        if (!heroPanelRoot) return;
+
+        const rootStyles = window.getComputedStyle(heroPanelRoot);
+        const heroPanelVisual = rootStyles.display === 'contents'
+          ? (heroPanelRoot.firstElementChild || heroPanelRoot)
+          : heroPanelRoot;
+        window.fixedSectionSortingState?.parallaxOffsets?.set('hero', 0);
+        gsap.set(heroPanelVisual, { clearProps: 'transform' });
+      };
+      renderHeroStage1 = () => {
+        const boxProgress = getStageProgress(heroShrinkStart + heroImageLag, heroImageDuration);
+        const maskProgress = Math.max(
+          getStageProgress(heroShrinkStart, heroShrinkDuration),
+          boxProgress
+        );
+        const isFullscreenRange = boxProgress < 0.999 || maskProgress < 0.999;
+        window.heroFullscreenParallaxLock = isFullscreenRange;
+
+        if (isFullscreenRange) resetHeroPanelParallax();
+
+        if (boxProgress <= 0.001 && maskProgress <= 0.001) {
+          gsap.set(heroImgWrap, {
+            position: 'fixed',
+            top: '0px',
+            left: '0px',
+            right: 'auto',
+            bottom: 'auto',
+            width: `${window.innerWidth}px`,
+            height: `${window.innerHeight}px`,
+            clipPath: 'inset(0px 0px 0px 0px)'
+          });
+          return;
+        }
+
         const boxTop = lerp(0, heroWrapRect.top, boxProgress);
         const boxLeft = lerp(0, heroWrapRect.left, boxProgress);
         const boxRight = lerp(window.innerWidth, heroWrapRect.right, boxProgress);
@@ -2812,19 +2870,8 @@ function initHeroAnimation() {
         }
       };
 
-      masterTl.to(stage1, {
-        mask: 1,
-        duration: heroShrinkDuration,
-        ease: 'power2.inOut',
-        onUpdate: renderHeroStage1
-      }, 'heroShrink');
-      masterTl.to(stage1, {
-        box: 1,
-        duration: heroImageDuration,
-        ease: 'power2.inOut',
-        onUpdate: renderHeroStage1,
-        onComplete: renderHeroStage1
-      }, `heroShrink+=${heroImageLag}`);
+      masterTl.to({}, { duration: heroShrinkDuration, ease: 'none' }, 'heroShrink');
+      renderHeroStage1();
     }
     if (titles) masterTl.to(titles, { opacity: 0, duration: heroTitleFadeDuration, ease: 'power2.in' }, heroTitleFadeStart);
 
