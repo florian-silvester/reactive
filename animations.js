@@ -2495,7 +2495,8 @@ function initScrubTypeText() {
       const textRevealDuration = tl.duration();
       if (overlay) {
         const overlayDelay = Math.min(0.25, textRevealDuration * 0.2);
-        gsap.set(overlay, { opacity: 0 });
+        const overlayStartOpacity = typeName === 'quote' ? 0.3 : 0;
+        gsap.set(overlay, { opacity: overlayStartOpacity });
         tl.to(overlay, {
           opacity: 1,
           duration: Math.max(0.1, textRevealDuration - overlayDelay),
@@ -2670,18 +2671,25 @@ function initHeroAnimation() {
   loadScrollTriggerOnce().then(build).catch(err => console.error('🎬 hero-animation:', err));
 
   let masterTl = null;
+  let exitTl = null;
 
   function build() {
+    if (exitTl) {
+      if (exitTl.scrollTrigger) exitTl.scrollTrigger.kill();
+      exitTl.kill();
+      exitTl = null;
+    }
     if (masterTl) {
       if (masterTl.scrollTrigger) masterTl.scrollTrigger.kill();
       masterTl.kill();
       gsap.set(document.querySelectorAll(
-        '.hero_cell_outer, .hero_cell_wrap, .hero_cell_label_wrap, .hero_cell_title_wrap, .hero_cell_pointer, #hero .hero_cell_wrap .u-image-wrapper, #hero .hero_cell_wrap img, [data-scene-titles], .hero_map_wrap'
+        '.hero_cell_outer, .hero_cell_wrap, .hero_cell_label_wrap, .hero_cell_title_wrap, .hero_cell_pointer, #hero .hero_cell_wrap .u-image-wrapper, #hero .hero_cell_wrap img, [data-scene-titles], .hero_map_wrap, .hero_text_outer'
       ), { clearProps: 'all' });
     }
 
     const titles = document.querySelector('[data-scene-titles]');
     const map    = document.querySelector('.hero_map_wrap');
+    const svgHeader = scene.querySelector('.hero_text_outer');
     const cells  = gsap.utils.toArray('.hero_cell_outer');
     if (!cells.length) { console.warn('🎬 hero-animation: no .hero_cell_outer cells found'); return; }
     const heroIdx = cells.indexOf(hero);
@@ -2699,6 +2707,7 @@ function initHeroAnimation() {
 
     const nonHero  = cells.filter(c => c !== hero);
     const heroCardEntryOffset = () => Math.min(window.innerWidth * 0.14, 140);
+    const heroCardEntryScale = 1.5;
     const heroWrap = mediaOf(hero); // the image-area container of #hero — this is what covers viewport
 
     // INITIAL STATE
@@ -2710,12 +2719,12 @@ function initHeroAnimation() {
       const direction = cells.indexOf(cell) < heroIdx ? -1 : 1;
       gsap.set(mediaContentsOf(cell).filter(Boolean), {
         x: () => direction * heroCardEntryOffset(),
-        scale: 1.1,
+        scale: heroCardEntryScale,
         willChange: 'transform, opacity'
       });
     });
     gsap.set(cells.map(borderOf).filter(Boolean),  { scaleY: 0, transformOrigin: 'top center' });
-    if (map) gsap.set(map, { opacity: 0 });
+    if (map) gsap.set(map, { opacity: 0, y: 0, scale: 1, transformOrigin: 'center center' });
 
     // Hero clip-path reveal: position the image-wrapper at viewport size, then
     // animate its clip-path from inset(0) (full viewport visible) to positive
@@ -2804,13 +2813,19 @@ function initHeroAnimation() {
     const heroStage2MaxDelay = Math.max(heroIdx, cells.length - 1 - heroIdx) * heroStage2Stagger;
     const heroGridHoldDuration = 0.35;
     const heroGridHoldStart = heroStage2Start + heroStage2MaxDelay + heroStage2FadeDuration;
-    const heroCardDriftDuration = 0.9;
-    const heroCardDriftMultipliers = [-0.16, -0.28, -0.1, -0.22, -0.34];
+    const heroExitDriftDuration = 2.2;
+    const heroCardDriftProfiles = [
+      { y: 0.04 },
+      { y: 0.08 },
+      { y: 0.02 },
+      { y: 0.06 },
+      { y: 0.1 }
+    ];
+    const heroSvgHeaderExitDistance = -0.28;
     const heroCardExitScales = [0.62, 0.48, 0.68, 0.54, 0.5];
     const heroCardTypeStart = heroGridHoldStart - 0.12;
     const heroCardTypeStagger = 0.1;
-    const heroCardTypeDuration = 0.45;
-    const heroCardTextHoldDuration = 0.35;
+    const heroCardReadableHoldDuration = 1.6;
     masterTl.addLabel('heroShrink', heroShrinkStart);
     if (heroImgWrap && heroFinalClip) {
       const lerp = (from, to, progress) => from + (to - from) * progress;
@@ -2946,11 +2961,15 @@ function initHeroAnimation() {
         .map(createHeroCardTypeItem)
         .filter(Boolean);
     });
-    const heroCardDriftStart = heroCardTypeStart
-      + heroCardTypeDuration
-      + Math.max(0, heroCardTypeItems.length - 1) * heroCardTypeStagger
-      + heroCardTextHoldDuration;
-
+    const heroCardTypeEntries = heroCardTypeItems.map((item, index) => {
+      const typeDuration = Math.min(0.45, Math.max(0.2, item.originalText.trim().length * 0.016));
+      const steps = Math.min(24, Math.max(8, item.originalText.trim().length));
+      const startAt = heroCardTypeStart + index * heroCardTypeStagger;
+      return { ...item, typeDuration, steps, startAt };
+    });
+    const heroCardTypeEnd = heroCardTypeEntries.reduce((end, { startAt, typeDuration }) => {
+      return Math.max(end, startAt + typeDuration);
+    }, heroGridHoldStart + heroGridHoldDuration);
     // STAGE 2 — map plus every cell's image+overlay reveal,
     // with side cards sliding inward from their side of the hero.
     if (map) {
@@ -2975,11 +2994,7 @@ function initHeroAnimation() {
       }
     });
 
-    heroCardTypeItems.forEach(({ wrapper, originalText, typeLayer }, index) => {
-      const typeDuration = Math.min(0.45, Math.max(0.2, originalText.trim().length * 0.016));
-      const steps = Math.min(24, Math.max(8, originalText.trim().length));
-      const startAt = heroCardTypeStart + index * heroCardTypeStagger;
-
+    heroCardTypeEntries.forEach(({ wrapper, typeLayer, typeDuration, steps, startAt }) => {
       masterTl.to(wrapper, { opacity: 1, duration: 0.08, ease: 'none' }, startAt)
         .to(typeLayer, {
           clipPath: 'inset(0 0% 0 0)',
@@ -2988,35 +3003,53 @@ function initHeroAnimation() {
         }, startAt);
     });
     const heroCardTextWrappers = heroCardTypeItems.map(({ wrapper }) => wrapper).filter(Boolean);
+
+    // Hold after the final card text finishes so the exit scrub cannot overlap the read.
+    masterTl.to({}, { duration: heroCardReadableHoldDuration }, heroCardTypeEnd);
+
+    exitTl = gsap.timeline({
+      scrollTrigger: {
+        trigger: outer,
+        start: 'bottom bottom',
+        end: 'bottom top',
+        scrub: true,
+        invalidateOnRefresh: true,
+        refreshPriority: 5
+      }
+    });
     if (heroCardTextWrappers.length) {
-      masterTl.to(heroCardTextWrappers, {
+      exitTl.to(heroCardTextWrappers, {
         opacity: 0,
         duration: 0.35,
-        ease: 'power1.out'
-      }, heroCardDriftStart);
+        ease: 'none'
+      }, 0);
     }
-
-    // Briefly hold the fully revealed grid; no map or line takeover stage.
-    masterTl.to({}, { duration: heroGridHoldDuration }, heroGridHoldStart);
+    if (svgHeader) {
+      exitTl.to(svgHeader, {
+        y: () => window.innerHeight * heroSvgHeaderExitDistance,
+        duration: heroExitDriftDuration,
+        ease: 'none'
+      }, 0);
+    }
     cells.forEach((cell, i) => {
-      if (cell === hero) return;
       const normalizedIndex = i - heroIdx;
-      const fallbackMultiplier = -0.12 - Math.abs(normalizedIndex) * 0.08;
-      const multiplier = heroCardDriftMultipliers[i] ?? fallbackMultiplier;
+      const fallbackMultiplier = 0.03 + Math.abs(normalizedIndex) * 0.01;
+      const driftProfile = heroCardDriftProfiles[i] || {};
+      const multiplier = driftProfile.y ?? fallbackMultiplier;
       const cardWrap = mediaOf(cell);
       const targetScale = heroCardExitScales[i] ?? 0.58;
-      masterTl.to(cell, {
+      exitTl.to(cell, {
         y: () => window.innerHeight * multiplier,
-        duration: heroCardDriftDuration,
+        duration: heroExitDriftDuration,
         ease: 'none'
-      }, heroCardDriftStart);
-      if (cardWrap) {
-        masterTl.to(cardWrap, {
+      }, 0);
+      if (cell !== hero && cardWrap) {
+        exitTl.to(cardWrap, {
           scale: targetScale,
-          transformOrigin: 'left bottom',
-          duration: heroCardDriftDuration,
+          transformOrigin: 'center center',
+          duration: heroExitDriftDuration,
           ease: 'none'
-        }, heroCardDriftStart);
+        }, 0);
       }
     });
   }
